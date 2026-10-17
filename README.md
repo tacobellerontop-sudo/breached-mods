@@ -8,7 +8,7 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 
 | Mod | What it adds |
 | --- | --- |
-| Protected video (DRM) | Google's Widevine for protected media. Big streaming sites (Netflix, Disney+) only play in browsers Google has certified, so they may still refuse Breached. Breached offers it by itself the first time a site needs it. |
+| Protected video (DRM) | Netflix, Disney+, Spotify and other protected media, through Google's Widevine (big streaming sites need Breached 0.1.8 or newer). Breached offers it by itself the first time a site needs it. |
 | Password manager | Saves the passwords you type and fills them in next time (Firefox's password store), asked in the command bar. |
 | Bookmarks | Ctrl+D to bookmark a page, Ctrl+B or `:bookmarks` to open one. |
 | Firefox Sync (experimental) | History, bookmarks and passwords synced with Firefox through a Mozilla account. |
