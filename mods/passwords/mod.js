@@ -125,7 +125,7 @@ const Passwords = {
       case "forget": {
         let login = await this.choose(`delete the saved login:`, logins);
         if (login) {
-          Services.logins.removeLogin(login);
+          await Services.logins.removeLoginAsync(login);
           Breached.showMessage(`Deleted ${login.username || "the login"} on ${host}`);
         }
         return;

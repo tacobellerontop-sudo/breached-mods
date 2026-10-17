@@ -48,7 +48,7 @@ async function update(oldLogin, newLogin) {
     bag.setProperty("username", newLogin.username);
   }
   bag.setProperty("timePasswordChanged", Date.now());
-  Services.logins.modifyLogin(oldLogin, bag);
+  await Services.logins.modifyLoginAsync(oldLogin, bag);
 }
 
 export const prompter = {
