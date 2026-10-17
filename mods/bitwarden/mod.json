@@ -1,0 +1,47 @@
+{
+  "id": "bitwarden",
+  "name": "Bitwarden",
+  "version": "1.3",
+  "description": "Fill logins from your Bitwarden vault with :bw.exe, and sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": [
+    "bw.exe",
+    "bw"
+  ],
+  "settings": [
+    {
+      "pref": "breached.mods.bitwarden.path",
+      "label": "Where bw.exe is",
+      "hint": "Leave empty to find bw.exe on your PATH.",
+      "placeholder": "C:\\Tools\\bw.exe",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.lockMinutes",
+      "label": "Lock the vault after this many idle minutes",
+      "hint": "0 keeps it unlocked until you close Breached or run :bw.exe lock.",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.passkeys",
+      "label": "When a site asks for a passkey",
+      "hint": "Bitwarden's passkeys for the site show as rows to pick from, or the only one is used without asking. New passkeys can be kept in Bitwarden either way.",
+      "type": "choice",
+      "options": [
+        [
+          "ask",
+          "Show Bitwarden's passkeys to pick from"
+        ],
+        [
+          "auto",
+          "Use Bitwarden's passkey without asking when there's one"
+        ],
+        [
+          "off",
+          "Leave passkeys to Windows"
+        ]
+      ]
+    }
+  ]
+}

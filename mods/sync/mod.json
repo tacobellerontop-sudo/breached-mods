@@ -1,0 +1,24 @@
+{
+  "id": "sync",
+  "name": "Firefox Sync",
+  "version": "1.0",
+  "description": "Sign in with your Mozilla account to sync history, bookmarks and passwords with Firefox on your other devices. :sync in signs in, :sync shows the state. Experimental: Breached isn't Firefox, so some account pages may not work yet.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "experimental": true,
+  "commands": ["sync"],
+  "settings": [
+    {
+      "pref": "breached.mods.sync.engines",
+      "label": "What to sync",
+      "hint": "Bookmarks need the Bookmarks mod to see them, passwords the Password manager mod. Takes effect after a restart.",
+      "type": "choice",
+      "options": [
+        ["Bookmarks,History,Passwords", "History, bookmarks and passwords"],
+        ["Bookmarks,History", "History and bookmarks"],
+        ["Bookmarks,Passwords", "Bookmarks and passwords"],
+        ["History", "History only"]
+      ]
+    }
+  ]
+}

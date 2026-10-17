@@ -1,0 +1,9 @@
+{
+  "id": "bookmarks",
+  "name": "Bookmarks",
+  "version": "1.0",
+  "description": "Keep pages to come back to. Ctrl+D or :bookmark saves the page you're on; Ctrl+B or :bookmarks lists them to open (type to narrow). They're Firefox bookmarks, so the Firefox Sync mod syncs them too.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["bookmark", "bookmarks"]
+}

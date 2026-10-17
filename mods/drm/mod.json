@@ -1,0 +1,9 @@
+{
+  "id": "drm",
+  "name": "Protected video (DRM)",
+  "version": "1.0",
+  "description": "Plays Netflix, Disney+, Spotify and other protected video and music. Downloads Google's Widevine (about 10 MB) from Mozilla when you install it. Breached offers this mod by itself the first time a site needs it.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["drm"]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "passwords",
+  "name": "Password manager",
+  "version": "1.0",
+  "description": "Saves the passwords you type into sites and fills them in next time, using Firefox's own password store. Breached asks in the command bar before saving. :passwords fills or copies one when a site has several.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["passwords", "pw"],
+  "settings": [
+    {
+      "pref": "breached.mods.passwords.autofill",
+      "label": "Fill in a site's saved password by itself",
+      "hint": "When it's off, :passwords fills it in.",
+      "type": "bool"
+    }
+  ]
+}
