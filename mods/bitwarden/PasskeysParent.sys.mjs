@@ -29,7 +29,7 @@ export class BitwardenPasskeysParent extends JSWindowActorParent {
       return null;
     }
     let browser = this.browsingContext.top.embedderElement;
-    let passkeys = handlers.get(browser?.ownerGlobal);
+    let passkeys = handlers.get(this.browsingContext.topChromeWindow) ?? handlers.values().next().value;
     if (!passkeys) {
       log(`${message.name} with the Bitwarden mod not loaded`);
       return null;

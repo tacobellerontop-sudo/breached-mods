@@ -21,7 +21,7 @@ function hostOf(origin) {
 }
 
 function shellFor(browser) {
-  return browser?.ownerGlobal?.Breached ?? null;
+  return browser?.browsingContext?.topChromeWindow?.Breached ?? null;
 }
 
 function who(login) {
