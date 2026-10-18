@@ -1,0 +1,9 @@
+{
+  "id": "screenshot",
+  "name": "Screenshots",
+  "version": "1.0",
+  "description": "Saves a picture of the page as a PNG in your Downloads folder. :screenshot takes what you can see, :screenshot -f the whole page top to bottom, and :screenshot -c copies it instead of saving. Ctrl+Shift+S takes one too.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["screenshot"]
+}

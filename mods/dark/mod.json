@@ -1,0 +1,20 @@
+{
+  "id": "dark",
+  "name": "Dark pages",
+  "version": "1.0",
+  "description": "Makes web pages dark. Sites that have their own dark look switch to it; light sites without one are turned dark too (photos and videos keep their colours). :dark stops darkening the site you're on, or starts again.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["dark"],
+  "settings": [
+    {
+      "pref": "breached.mods.dark.mode",
+      "label": "Which sites",
+      "type": "choice",
+      "options": [
+        ["all", "All: use a site's dark look, or darken it"],
+        ["own", "Only sites that have their own dark look"]
+      ]
+    }
+  ]
+}

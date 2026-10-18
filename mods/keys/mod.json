@@ -1,0 +1,17 @@
+{
+  "id": "keys",
+  "name": "Vim keys and link hints",
+  "version": "1.0",
+  "description": "qutebrowser-style keys on web pages: f shows a letter on every link to follow it from the keyboard (F opens it in a new tab), j/k/h/l scroll, gg and G jump to the top and bottom, H/L go back and forward, J/K switch tabs, d closes the tab, u brings it back, r reloads and o opens the command bar. Keys typed into text boxes are left alone.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["hint"],
+  "settings": [
+    {
+      "pref": "breached.mods.keys.hintChars",
+      "label": "Letters used for link hints",
+      "hint": "The first ones are used most. Home row letters are easiest to reach.",
+      "type": "text"
+    }
+  ]
+}

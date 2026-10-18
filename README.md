@@ -13,6 +13,9 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 | Bookmarks | Ctrl+D to bookmark a page, Ctrl+B or `:bookmarks` to open one. |
 | Firefox Sync (experimental) | History, bookmarks and passwords synced with Firefox through a Mozilla account. |
 | Speed | Trades memory for speed: tabs stay loaded, a spare process waits for new tabs, more page processes, a bigger memory cache, link prefetching. Roughly 150-400 MB more memory. |
+| Vim keys and link hints | qutebrowser-style keys on pages: f puts letters on links to follow them, j/k scroll, gg/G, H/L back and forward, J/K switch tabs, d closes, u reopens. |
+| Dark pages | Sites with a dark look switch to it, light sites are darkened (photos keep their colours). :dark per site. |
+| Screenshots | :screenshot saves a PNG of the page to Downloads; -f for the whole page, -c to copy. Ctrl+Shift+S. |
 | Bitwarden | Logins and passkeys from your Bitwarden vault, through the Bitwarden command-line app. |
 
 ## Making a mod
