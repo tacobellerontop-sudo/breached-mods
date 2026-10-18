@@ -16,6 +16,7 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 | Vim keys and link hints | qutebrowser-style keys on pages: f puts letters on links to follow them, j/k scroll, gg/G, H/L back and forward, J/K switch tabs, d closes, u reopens. |
 | Dark pages | Sites with a dark look switch to it, light sites are darkened (photos keep their colours). :dark per site. |
 | Screenshots | :screenshot saves a PNG of the page to Downloads; -f for the whole page, -c to copy. Ctrl+Shift+S. |
+| Tab groups | Tabs together under a coloured name in the tab bar; click the name to fold the group away. :group, :ungroup, :groups. |
 | Bitwarden | Logins and passkeys from your Bitwarden vault, through the Bitwarden command-line app. |
 
 ## Making a mod

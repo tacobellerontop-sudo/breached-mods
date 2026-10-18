@@ -1,0 +1,9 @@
+{
+  "id": "groups",
+  "name": "Tab groups",
+  "version": "1.0",
+  "description": "Keep tabs together under a coloured name in the tab bar. :group work puts the tab you're on in the \"work\" group (made if it's new); click a group's name, or :groups, to fold it away and back. :ungroup takes a tab out. Groups come back when Breached reopens your tabs.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["group", "ungroup", "groups"]
+}
