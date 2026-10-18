@@ -20,6 +20,9 @@ defaults.setBoolPref(OFFER, true);
 // Breached turns translation off; the mod turns it on on the default branch,
 // so removing the mod (or a restart without it) turns it off again.
 defaults.setBoolPref(ENABLE, true);
+// Firefox's own default (its translation panel opens by itself); here it
+// lets Breached ask.
+defaults.setBoolPref("browser.translations.automaticallyPopup", true);
 Mod.onUninstall(() => defaults.setBoolPref(ENABLE, false));
 
 const { TranslationsParent } = ChromeUtils.importESModule("resource://gre/actors/TranslationsParent.sys.mjs");
