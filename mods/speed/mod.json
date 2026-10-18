@@ -1,0 +1,17 @@
+{
+  "id": "speed",
+  "name": "Speed",
+  "version": "1.0",
+  "description": "Trades memory for speed by turning back on what Breached trims: tabs stay loaded instead of sleeping after 15 minutes, a spare process waits so new tabs and sites open sooner, up to 8 page processes, a bigger memory cache, link prefetching and shaders ready at start. Expect roughly 150-400 MB more memory. :speed shows what it changed.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["speed"],
+  "settings": [
+    {
+      "pref": "breached.mods.speed.keepTabsLoaded",
+      "label": "Keep tabs loaded (no sleeping after 15 minutes)",
+      "hint": "Going back to an old tab is instant instead of reloading it. Tabs still sleep if Windows runs low on memory.",
+      "type": "bool"
+    }
+  ]
+}

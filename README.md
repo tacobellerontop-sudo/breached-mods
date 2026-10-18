@@ -12,6 +12,7 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 | Password manager | Saves the passwords you type and fills them in next time (Firefox's password store), asked in the command bar. |
 | Bookmarks | Ctrl+D to bookmark a page, Ctrl+B or `:bookmarks` to open one. |
 | Firefox Sync (experimental) | History, bookmarks and passwords synced with Firefox through a Mozilla account. |
+| Speed | Trades memory for speed: tabs stay loaded, a spare process waits for new tabs, more page processes, a bigger memory cache, link prefetching. Roughly 150-400 MB more memory. |
 | Bitwarden | Logins and passkeys from your Bitwarden vault, through the Bitwarden command-line app. |
 
 ## Making a mod
