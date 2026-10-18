@@ -163,7 +163,7 @@ export class BreachedKeysChild extends JSWindowActorChild {
       ".hint { position: fixed; font: bold 12px/1 Consolas, monospace; padding: 2px 3px; background: #f5d76e; color: #000; border: 1px solid #8a6d00; border-radius: 2px; text-transform: uppercase; }" +
       ".hint b { color: #a23; }";
     root.append(style);
-    this.hints = { layer, newTab, typed: "", items: [] };
+    this.hints = { layer, newTab, typed: "", items: [], x: win.scrollX, y: win.scrollY };
     targets.forEach(({ el, rect }, i) => {
       let span = doc.createElement("span");
       span.className = "hint";
@@ -174,10 +174,19 @@ export class BreachedKeysChild extends JSWindowActorChild {
       this.hints.items.push({ el, name: names[i], span });
     });
     (doc.body ?? doc.documentElement).append(layer);
-    win.addEventListener("scroll", this.hideHintsOnScroll ??= () => this.hideHints(), { once: true });
+    // The letters sit where the links were, so scrolling takes them away.
+    // A scroll that ends where it was (the tail of an earlier scroll) doesn't.
+    this.hideHintsOnScroll ??= () => {
+      let h = this.hints;
+      if (h && (Math.abs(win.scrollX - h.x) > 2 || Math.abs(win.scrollY - h.y) > 2)) {
+        this.hideHints();
+      }
+    };
+    win.addEventListener("scroll", this.hideHintsOnScroll);
   }
 
   hideHints() {
+    this.contentWindow?.removeEventListener("scroll", this.hideHintsOnScroll);
     if (this.hints) {
       this.hints.layer.remove();
       this.hints = null;
