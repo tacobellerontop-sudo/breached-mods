@@ -44,3 +44,7 @@ A mod is a folder in `mods/` named after its id, with a `mod.json` and a script:
 The script runs in each Breached window with a `Mod` object: `Mod.command(name, { usage, run(args) })`, `Mod.key(key, modifiers, fn)`, `Mod.actor(name, { parent, child, events })` for page helpers, `Mod.hook(name, object)`, `Mod.pref(name, fallback)`, `Mod.onUnload(fn)` (window closes or mod removed) and `Mod.onUninstall(fn)` (mod removed). `Mod.url` is the mod folder's `resource://` address, for importing its own `.sys.mjs` modules. Mods run with the browser's full rights.
 
 `python3 scripts/build.py` builds the site into `_site/`; pushing to `main` publishes it with GitHub Pages.
+
+## Licence
+
+Mozilla Public License 2.0, see [LICENSE](LICENSE).
