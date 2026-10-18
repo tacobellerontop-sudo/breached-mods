@@ -71,6 +71,18 @@ Mod.command("translate", {
   },
 });
 
+// Firefox looks at each page's language when its address changes (that
+// starts the page's translation helper, which offers to translate).
+const progress = {
+  onLocationChange(browser, webProgress, request, location, flags) {
+    if (webProgress.isTopLevel) {
+      TranslationsParent.onLocationChange(window, location, webProgress, flags);
+    }
+  },
+};
+Breached.tabsProgressListeners.add(progress);
+Mod.onUnload(() => Breached.tabsProgressListeners.delete(progress));
+
 // Firefox opens its translation panel on this; Breached asks in the command bar.
 function onOffer(event) {
   let browser = event.target;

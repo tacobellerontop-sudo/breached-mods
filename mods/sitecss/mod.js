@@ -23,7 +23,7 @@ function sites() {
 const SITE_CSS = Mod.actor("BreachedSiteCss", {
   parent: "SiteCssParent.sys.mjs",
   child: "SiteCssChild.sys.mjs",
-  events: { DOMDocElementInserted: {} },
+  events: { DOMDocElementInserted: {}, DOMContentLoaded: {} },
   allFrames: true,
   matches: ["http://*/*", "https://*/*"],
 });
@@ -42,8 +42,9 @@ function applyEverywhere(name) {
   for (let tab of Breached.tabs) {
     let contexts = tab.browser?.browsingContext?.getAllBrowsingContextsInSubtree() ?? [];
     for (let bc of contexts) {
-      let actor = bc.currentWindowGlobal?.documentURI?.host == name && bc.currentWindowGlobal.getActor(SITE_CSS);
-      actor?.sendAsyncMessage("SiteCss:Apply", { css });
+      if (bc.currentWindowGlobal?.documentURI?.host == name) {
+        bc.currentWindowGlobal.getActor(SITE_CSS).sendAsyncMessage("SiteCss:Apply", { css });
+      }
     }
   }
 }
