@@ -1,0 +1,9 @@
+{
+  "id": "pip",
+  "name": "Picture-in-picture",
+  "version": "1.0",
+  "description": "Watch a video in a small window that stays on top while you use other tabs and apps. Point at a video for Firefox's picture-in-picture button, or type :pip. The window has play, pause, volume, seeking and a button back to the tab.",
+  "script": "mod.js",
+  "breached": "0.1.12",
+  "commands": ["pip"]
+}

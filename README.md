@@ -17,6 +17,9 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 | Dark pages | Sites with a dark look switch to it, light sites are darkened (photos keep their colours). :dark per site. |
 | Screenshots | :screenshot saves a PNG of the page to Downloads; -f for the whole page, -c to copy. Ctrl+Shift+S. |
 | Tab groups | Tabs together under a coloured name in the tab bar; click the name to fold the group away. :group, :ungroup, :groups. |
+| Picture-in-picture | Videos play in a small window that stays on top, with Firefox's player controls. Point at a video for its button, or `:pip` (Ctrl+Shift+]). Needs Breached 0.1.12. |
+| Translate pages | Firefox's private translation: pages are translated on your computer. Breached asks on pages in other languages; `:translate`, `:translate de`, `:translate off`. Each language downloads once (20-40 MB). Needs Breached 0.1.12. |
+| Custom CSS per site | Your own style rules per website. `:css` edits the site's rules in the command bar, `:css off` removes them, `:css list` shows the sites. |
 | Bitwarden | Logins and passkeys from your Bitwarden vault, through the Bitwarden command-line app. |
 
 ## Making a mod

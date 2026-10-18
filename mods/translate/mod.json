@@ -1,0 +1,22 @@
+{
+  "id": "translate",
+  "name": "Translate pages",
+  "version": "1.0",
+  "description": "Firefox's private page translation: pages are translated on your computer, nothing is sent to a translation service. Breached asks when a page is in another language, or type :translate (:translate de for German, :translate off for the original). Each language downloads once from Mozilla, about 20 to 40 MB.",
+  "script": "mod.js",
+  "breached": "0.1.12",
+  "commands": ["translate"],
+  "settings": [
+    {
+      "pref": "breached.mods.translate.to",
+      "label": "Translate into",
+      "hint": "A language code like en, de or fr. Empty means the language Breached runs in.",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.translate.offer",
+      "label": "Offer to translate pages in other languages",
+      "type": "bool"
+    }
+  ]
+}

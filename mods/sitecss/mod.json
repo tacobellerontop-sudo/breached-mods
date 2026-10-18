@@ -1,0 +1,9 @@
+{
+  "id": "sitecss",
+  "name": "Custom CSS per site",
+  "version": "1.0",
+  "description": "Your own style rules for each website: hide a banner, change a font, widen a page. :css opens the site's rules in the command bar to edit, :css <rules> sets them, :css off removes them and :css list shows the sites that have some.",
+  "script": "mod.js",
+  "breached": "0.1.7",
+  "commands": ["css"]
+}
