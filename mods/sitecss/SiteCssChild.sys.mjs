@@ -6,7 +6,8 @@
 
 export class BreachedSiteCssChild extends JSWindowActorChild {
   async handleEvent() {
-    let host = this.document?.location?.host;
+    // Without the port, like the host names the mod keeps.
+    let host = this.document?.location?.hostname;
     if (!host) {
       return;
     }

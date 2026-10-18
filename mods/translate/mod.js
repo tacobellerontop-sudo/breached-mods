@@ -71,22 +71,11 @@ Mod.command("translate", {
   },
 });
 
-// Firefox looks at each page's language when its address changes (that
-// starts the page's translation helper, which offers to translate).
-const progress = {
-  onLocationChange(browser, webProgress, request, location, flags) {
-    if (webProgress.isTopLevel) {
-      TranslationsParent.onLocationChange(window, location, webProgress, flags);
-    }
-  },
-};
-Breached.tabsProgressListeners.add(progress);
-Mod.onUnload(() => Breached.tabsProgressListeners.delete(progress));
-
-// Firefox opens its translation panel on this; Breached asks in the command bar.
-function onOffer(event) {
-  let browser = event.target;
-  if (!Services.prefs.getBoolPref(OFFER, true) || !Breached.tabs.some(t => t.browser === browser)) {
+// Firefox offers from its own front end, which Breached doesn't have, so
+// Breached checks each page it finishes loading in the tab you're on.
+const asked = new Set();
+async function maybeOffer(browser) {
+  if (!Services.prefs.getBoolPref(OFFER, true) || browser !== Breached.selectedBrowser) {
     return;
   }
   let actor;
@@ -95,22 +84,44 @@ function onOffer(event) {
   } catch (e) {
     return;
   }
-  actor.getLangTags().then(async tags => {
-    if (!tags?.docLangTag) {
-      return;
-    }
-    let from = languageName(tags.docLangTag);
-    let item = await Breached.pickForTab(browser, `This page is in ${from}. Translate it?`, [
-      { label: "yes", detail: "translate it on this computer", answer: "yes" },
-      { label: "no", detail: "not now", answer: "no" },
-      { label: "never", detail: `don't ask for ${from}`, answer: "never" },
-    ]);
-    if (item?.answer == "yes") {
-      await translate(browser, "");
-    } else if (item?.answer == "never") {
-      TranslationsParent.addLangTagToPref(tags.docLangTag, "browser.translations.neverTranslateLanguages");
-    }
-  }).catch(e => Breached.showMessage(`Translation: ${e.message}`, "error"));
+  let tags = await actor.getLangTags();
+  let from = tags?.docLangTag;
+  let host = browser.currentURI?.host;
+  if (!from || !tags.isDocLangTagSupported || !host || asked.has(host) || actor.languageState?.requestedLanguagePair) {
+    return;
+  }
+  let to = Services.prefs.getStringPref(TO, "") || tags.userLangTag;
+  if (!to || from.split("-")[0] == to.split("-")[0] || TranslationsParent.shouldNeverTranslateLanguage(from)) {
+    return;
+  }
+  // Once per site each time Breached runs, like Firefox.
+  asked.add(host);
+  let name = languageName(from);
+  let item = await Breached.pickForTab(browser, `This page is in ${name}. Translate it?`, [
+    { label: "yes", detail: `into ${languageName(to)}, on this computer`, answer: "yes" },
+    { label: "no", detail: "not now", answer: "no" },
+    { label: "never", detail: `don't ask for ${name}`, answer: "never" },
+  ]);
+  if (item?.answer == "yes") {
+    await translate(browser, to);
+  } else if (item?.answer == "never") {
+    TranslationsParent.addLangTagToPref(from, "browser.translations.neverTranslateLanguages");
+  }
 }
-window.addEventListener("TranslationsParent:OfferTranslation", onOffer);
-Mod.onUnload(() => window.removeEventListener("TranslationsParent:OfferTranslation", onOffer));
+
+const progress = {
+  onLocationChange(browser, webProgress, request, location, flags) {
+    // Keeps Firefox's translation state in step with the page.
+    if (webProgress.isTopLevel) {
+      TranslationsParent.onLocationChange(window, location, webProgress, flags);
+    }
+  },
+  onStateChange(browser, webProgress, request, flags) {
+    let { STATE_STOP, STATE_IS_WINDOW } = Ci.nsIWebProgressListener;
+    if (webProgress.isTopLevel && flags & STATE_STOP && flags & STATE_IS_WINDOW) {
+      maybeOffer(browser).catch(e => Breached.showMessage(`Translation: ${e.message}`, "error"));
+    }
+  },
+};
+Breached.tabsProgressListeners.add(progress);
+Mod.onUnload(() => Breached.tabsProgressListeners.delete(progress));
