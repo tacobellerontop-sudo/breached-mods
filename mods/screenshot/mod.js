@@ -41,10 +41,10 @@ async function take({ full = false, copy = false } = {}) {
     if (!size) {
       throw new Error("can't take the whole page here; :screenshot takes what you can see");
     }
-    scale = Math.min(1, MAX_SIDE / size.height, MAX_SIDE / size.width) * (browser.ownerGlobal.devicePixelRatio || 1);
+    scale = Math.min(1, MAX_SIDE / size.height, MAX_SIDE / size.width) * (window.devicePixelRatio || 1);
     rect = new DOMRect(0, 0, size.width, size.height);
   } else {
-    scale = browser.ownerGlobal.devicePixelRatio || 1;
+    scale = window.devicePixelRatio || 1;
   }
   let bitmap = await global.drawSnapshot(rect, scale, "white");
   let canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");

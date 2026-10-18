@@ -31,7 +31,7 @@ export class BreachedDarkChild extends JSWindowActorChild {
     if (!doc?.documentElement || doc.contentType == "application/pdf" || !doc.documentElement.namespaceURI?.includes("xhtml")) {
       return;
     }
-    let host = doc.location?.host ?? "";
+    let host = doc.location?.hostname ?? "";
     let off = Services.prefs.getStringPref("breached.mods.dark.offSites", "").split(" ").includes(host);
     let darken = !off && Services.prefs.getStringPref("breached.mods.dark.mode", "all") == "all" && this.isLight();
     let utils = win.windowUtils;
