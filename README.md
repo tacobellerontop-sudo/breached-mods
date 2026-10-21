@@ -20,7 +20,7 @@ Open that page in Breached and press Install (Breached asks you to confirm). Ins
 | Picture-in-picture | Videos play in a small window that stays on top, with Firefox's player controls. Point at a video for its button, or `:pip` (Ctrl+Shift+]). Needs Breached 0.1.12. |
 | Translate pages | Firefox's private translation: pages are translated on your computer. Breached asks on pages in other languages; `:translate`, `:translate de`, `:translate off`. Each language downloads once (20-40 MB). Needs Breached 0.1.12. |
 | Custom CSS per site | Your own style rules per website. `:css` edits the site's rules in the command bar, `:css off` removes them, `:css list` shows the sites. |
-| Bitwarden | Paste or copy logins from your Bitwarden vault into any login box with Ctrl+Shift+L, unlock with a PIN, and use passkeys kept there, through the Bitwarden command-line app. |
+| Bitwarden | Paste or copy logins from your Bitwarden vault into any login box with Ctrl+Shift+L (or both at once: username, Tab, password), unlock with a PIN, and use passkeys kept there, through the Bitwarden command-line app. |
 
 ## Making a mod
 

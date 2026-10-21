@@ -289,6 +289,10 @@ const Bitwarden = {
     let { login } = picked.login;
     let who = login.username || picked.login.name;
     let actions = [];
+    if (login.username && login.password) {
+      // Like qutebrowser's Bitwarden script: from the username box, Tab to the password.
+      actions.push({ label: "paste both", detail: "username, Tab, password", paste: "both" });
+    }
     if (login.username) {
       actions.push({ label: "paste username", detail: login.username, paste: "username" });
     }
@@ -312,10 +316,15 @@ const Bitwarden = {
       return;
     }
     let what = action.paste ?? action.copy;
+    if (what == "both") {
+      await this.paste(browser, [login.username, "\t", login.password]);
+      Breached.showMessage(`Pasted the username and password of ${who}`);
+      return;
+    }
     let text = what == "totp" ? await this.totp(picked.login) : login[what];
     let name = { username: "username", password: "password", totp: "two-step code" }[what];
     if (action.paste) {
-      await this.paste(browser, text);
+      await this.paste(browser, [text]);
       Breached.showMessage(`Pasted the ${name} of ${who}`);
     } else {
       this.copy(text, what != "username");
@@ -331,8 +340,8 @@ const Bitwarden = {
     return r.stdout;
   },
 
-  /** Types text into the page's focused box, as a keyboard would. */
-  async paste(browser, text) {
+  /** Types into the page's focused box, as a keyboard would; "\t" presses Tab. */
+  async paste(browser, parts) {
     browser.focus();
     // Let the page get its focus back (the rows had it).
     await new Promise(r => setTimeout(r, 150));
@@ -340,7 +349,17 @@ const Bitwarden = {
     if (!tip.beginInputTransaction(window, () => true)) {
       throw new Error("couldn't type into the page");
     }
-    tip.commitCompositionWith(text);
+    for (let part of parts) {
+      if (part == "\t") {
+        let tab = new KeyboardEvent("", { key: "Tab", code: "Tab", keyCode: KeyboardEvent.DOM_VK_TAB });
+        tip.keydown(tab);
+        tip.keyup(tab);
+        // Let the page move its focus.
+        await new Promise(r => setTimeout(r, 100));
+      } else {
+        tip.commitCompositionWith(part);
+      }
+    }
   },
 
   /** Copies text; a secret is cleared after 30 seconds if it's still there. */
