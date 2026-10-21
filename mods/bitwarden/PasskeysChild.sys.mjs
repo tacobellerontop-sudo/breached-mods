@@ -63,6 +63,16 @@ export class BitwardenPasskeysChild extends JSWindowActorChild {
     }
   }
 
+  /** Tells the window something went wrong; false if the page is gone. */
+  report(data) {
+    try {
+      this.sendAsyncMessage("Passkey:Error", data);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   /** Answers get() or create(); native() hands it back to Gecko. */
   ask(win, kind, options, native) {
     // The page's own view of its options: objects of its own classes (or
@@ -82,7 +92,7 @@ export class BitwardenPasskeysChild extends JSWindowActorChild {
       request = kind == "get" ? this.readGet(win, page) : this.readCreate(win, page);
     } catch (e) {
       // Something we don't understand: Gecko checks it and says what's wrong.
-      this.sendAsyncMessage("Passkey:Error", { message: `reading the ${kind} request: ${e}`, show: true });
+      this.report({ message: `reading the ${kind} request: ${e}`, show: true });
       return native();
     }
     let signal = options.signal;
@@ -113,12 +123,14 @@ export class BitwardenPasskeysChild extends JSWindowActorChild {
             } else if (answer?.error) {
               fail(answer.error, answer.message ?? "The request was not allowed.");
             } else {
-              this.sendAsyncMessage("Passkey:Error", { message: `no answer for ${kind}, handing it to Gecko` });
+              this.report({ message: `no answer for ${kind}, handing it to Gecko` });
               resolve(native());
             }
           },
           e => {
-            this.sendAsyncMessage("Passkey:Error", { message: `asking the window: ${e}` });
+            if (win.closed || !this.report({ message: `asking the window: ${e}` })) {
+              return; // the page went away
+            }
             resolve(native());
           }
         );
