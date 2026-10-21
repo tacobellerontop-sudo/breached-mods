@@ -1,25 +1,34 @@
-/* Bitwarden mod: fills logins from your vault through the Bitwarden CLI.
+/* Bitwarden mod: logins from your vault through the Bitwarden CLI.
  *
- *   :bw.exe          fill the login for this page (asks for your master
- *                    password the first time). With several logins they
- *                    show as rows above the command bar: type to narrow,
- *                    Up/Down or Tab to move, Enter to fill.
- *                    A page with a login form shows the rows by itself
- *                    (unless the setting says only with :bw.exe).
+ *   Ctrl+Shift+L     (or :bw.exe) click into a login box first. The site's
+ *                    logins show as rows above the command bar: type to
+ *                    narrow, Up/Down to move, Enter to pick. Then pick what
+ *                    to do: paste the username or password into the box
+ *                    you were in, or copy it.
  *   :bw.exe totp     copy this page's two-step code
  *   :bw.exe sync     fetch the latest vault
- *   :bw.exe lock     forget the unlock key
+ *   :bw.exe lock     lock (the PIN unlocks it again)
+ *   :bw.exe lock all lock so that only the master password unlocks it
  *   :bw.exe login    log in to Bitwarden
+ *   :bw.exe pin      set or change the PIN
  *   :bw.exe status
+ *
+ * The first unlock asks for your master password, then offers a PIN for
+ * the next ones (after the vault locks itself when idle, or after a
+ * restart if the setting says so).
  *
  * Passkeys: when a site asks to sign in with a passkey, the ones Bitwarden
  * has for it show as rows (or one is used straight away, if the setting
  * says so). A site that offers passkeys in its login box without asking
- * shows them with its logins. New passkeys can be kept in Bitwarden too. The
- * signing happens here (PasskeyCrypto.sys.mjs); bw.exe only stores them.
+ * shows them with the logins of Ctrl+Shift+L. New passkeys can be kept in
+ * Bitwarden too. The signing happens here (PasskeyCrypto.sys.mjs); bw.exe
+ * only stores them.
  *
- * The unlock key is kept in memory only, and the master password is passed
- * to bw.exe in an environment variable, never on its command line. */
+ * Pasting types the text into the page the way a keyboard does, so it
+ * works in any box the page has. The unlock key is kept in memory only
+ * (with a PIN it can also be kept, locked with the PIN, in the profile),
+ * and the master password is passed to bw.exe in an environment
+ * variable, never on its command line. */
 
 "use strict";
 
@@ -93,13 +102,17 @@ const Bitwarden = {
     }
   },
 
-  lock() {
+  /** Locks: the idle timer keeps the PIN-locked copy, :bw.exe lock doesn't. */
+  lock({ forget = false } = {}) {
     clearTimeout(this._lockTimer);
     this.session = null;
+    if (forget) {
+      Pin.forget();
+    }
   },
 
-  /** Makes sure the vault is unlocked, asking for the master password. */
-  async unlock(label = "bitwarden master password:", { auto = false } = {}) {
+  /** Makes sure the vault is unlocked, asking for the PIN or the master password. */
+  async unlock() {
     let status = await this.status();
     if (status == "unauthenticated") {
       throw new Error("not logged in: run :bw.exe login (or bw login in a terminal)");
@@ -107,10 +120,21 @@ const Bitwarden = {
     if (status == "unlocked" && this.session) {
       return;
     }
-    if (auto && Bitwarden.busy()) {
-      throw new Error("cancelled"); // don't take over what's being typed
+    if (Pin.has()) {
+      let session = await Pin.unlock();
+      if (session) {
+        this.session = session;
+        if ((await this.status()) == "unlocked") {
+          this.touch();
+          return;
+        }
+        // bw.exe was locked since (say, bw lock in a terminal): the key is spent.
+        this.session = null;
+        Pin.forget();
+        Breached.showMessage("The PIN no longer unlocks Bitwarden: use the master password", "error");
+      }
     }
-    let password = await Breached.prompt(label, { password: true });
+    let password = await Breached.prompt("bitwarden master password:", { password: true });
     if (!password) {
       throw new Error("cancelled");
     }
@@ -124,6 +148,10 @@ const Bitwarden = {
       throw new Error(r.stderr || "couldn't unlock");
     }
     this.session = r.stdout;
+    this.touch();
+    if (!Pin.has() && Mod.pref("breached.mods.bitwarden.pin", "ask") != "off") {
+      await Pin.set(this.session, { offer: true });
+    }
   },
 
   async login() {
@@ -169,78 +197,26 @@ const Bitwarden = {
     return items.filter(i => i.type == 1 && i.login);
   },
 
-  /** Fills a login into the page's frames from the same site (or the login's own sites). */
-  async fill(item, browser = Breached.selectedBrowser) {
-    let top = topOf(browser);
-    // The page itself always; its frames from the same site or the login's own sites.
-    let sites = new Set([siteOf(browser.currentURI), siteOf(top.currentWindowGlobal?.documentURI)]);
-    for (let { uri } of item.login.uris ?? []) {
-      try {
-        sites.add(siteOf(Services.io.newURI(uri)));
-      } catch (e) {
-        // not a web address
-      }
-    }
-    sites.delete(null);
-    let filled = false;
-    let problems = [];
-    let seen = [];
-    // A page that's still drawing its form (after a reload, say) gets a few tries.
-    for (let attempt = 0; attempt < 5 && !filled; attempt++) {
-      if (attempt) {
-        await new Promise(r => setTimeout(r, 500));
-      }
-      problems = [];
-      seen = [];
-      for (let bc of top.getAllBrowsingContextsInSubtree()) {
-        let wg = bc.currentWindowGlobal;
-        if (!wg || (bc != top && !sites.has(siteOf(wg.documentURI)))) {
-          continue;
-        }
-        try {
-          let r = await Promise.race([
-            wg.getActor(ACTOR).sendQuery("Bitwarden:Fill", {
-              username: item.login.username ?? "",
-              password: item.login.password ?? "",
-            }),
-            new Promise((resolve, reject) => setTimeout(() => reject(new Error("the page didn't answer")), 3000)),
-          ]);
-          filled ||= r?.filled ?? r === true;
-          if (!r?.filled) {
-            seen.push(`${r?.url ?? wg.documentURI?.prePath}: ${r?.seen?.length ? r.seen.join(", ") : "no fields"}`);
-          }
-        } catch (e) {
-          problems.push(`${wg.documentURI?.prePath}: ${e.message ?? e}`);
-        }
-      }
-    }
-    let who = item.login.username || item.name;
-    if (filled) {
-      Breached.showMessage(`Filled ${who}`);
-    } else {
-      let found = [...problems, ...seen];
-      let why = found.length
-        ? found.join("; ")
-        : `no frames from ${[...sites].join(", ") || "a website"}: page ${browser.currentURI?.spec?.replace(/[?#].*/, "")}, ` +
-          `${top.getAllBrowsingContextsInSubtree().length} frames, top ${top.currentWindowGlobal ? "loaded" : "not loaded"}`;
-      Breached.showMessage(`No login form found for ${who} (Bitwarden ${Mod.info.version}; ${why})`, "error");
-      console.error("Bitwarden: nothing filled", [...sites], found);
-    }
-  },
-
   async run(args) {
     let [sub, ...rest] = args.trim().split(/\s+/);
     switch (sub) {
       case "lock":
-        this.lock();
-        await this.bw(["lock"]);
-        Breached.showMessage("Bitwarden locked");
+        if (rest[0] == "all") {
+          // The unlock key itself is spent, and the PIN with it.
+          this.lock({ forget: true });
+          await this.bw(["lock"]);
+          Breached.showMessage("Bitwarden locked; the master password is needed next time");
+        } else {
+          this.lock();
+          Breached.showMessage(Pin.has() ? "Bitwarden locked (the PIN unlocks it)" : "Bitwarden locked");
+        }
         return;
       case "login":
         await this.login();
         return;
-      case "check":
-        await this.check();
+      case "pin":
+        await this.unlock();
+        await Pin.set(this.session, { offer: false });
         return;
       case "status": {
         let status = await this.status();
@@ -261,178 +237,228 @@ const Bitwarden = {
         if (!item) {
           throw new Error("no two-step code saved for this site");
         }
-        let r = await this.bw(["get", "totp", item.id]);
-        if (r.code != 0) {
-          throw new Error(r.stderr || "couldn't get the code");
-        }
-        Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper).copyString(r.stdout);
+        this.copy(await this.totp(item), true);
         Breached.showMessage("Two-step code copied");
         this.touch();
         return;
       }
     }
     if (sub) {
-      throw new Error(`unknown: ${sub} (try lock, sync, totp, login, status, check)`);
+      throw new Error(`unknown: ${sub} (try lock, sync, totp, login, pin, status)`);
     }
-    await this.choose(Breached.selectedBrowser, false);
-  },
-
-  /** :bw.exe check: shows whether this tab's page answers, as rows to read. */
-  async check() {
-    let browser = Breached.selectedBrowser;
-    let top = topOf(browser);
-    let lines = [];
-    let line = (label, detail) => lines.push({ label, detail: String(detail) });
-    line("mod", `Bitwarden ${Mod.info.version}, Breached ${Breached.version ?? ""}`);
-    line("page", browser.currentURI?.spec?.replace(/[?#].*/, ""));
-    line("windows", [...Services.wm.getEnumerator(null)].length);
-    line("mods on", [...ModHost.loaded.keys()].join(", "));
-    let ublock = WebExtensionPolicy.getByID("uBlock0@raymondhill.net");
-    line("uBlock", ublock ? "on" : "off");
-    let wg = top?.currentWindowGlobal;
-    line("frames", `${top?.getAllBrowsingContextsInSubtree().length ?? 0}, top ${wg ? "loaded" : "not loaded"}, process ${wg?.osPid ?? "?"}`);
-    let ask = async (actor, name) => {
-      let start = Date.now();
-      try {
-        let r = await Promise.race([
-          wg.getActor(actor).sendQuery(name, {}),
-          new Promise((resolve, reject) => setTimeout(() => reject(new Error("no answer in 5s")), 5000)),
-        ]);
-        return `${Date.now() - start} ms: ${typeof r == "object" ? JSON.stringify(r) : r}`;
-      } catch (e) {
-        return `${Date.now() - start} ms: ${e.message ?? e}`;
-      }
-    };
-    if (wg) {
-      let [core, own] = await Promise.all([ask("Breached", "Breached:Ping"), ask(ACTOR, "Bitwarden:Ping")]);
-      line("Breached's page helper", core);
-      line("Bitwarden's page helper", own);
-    }
-    await Breached.pick("bitwarden check (take a screenshot):", lines);
+    await this.choose(Breached.selectedBrowser);
   },
 
   /**
-   * Shows this page's logins (and passkeys, if the page's login box is
-   * waiting for one) as rows and fills the picked one. auto: the page asked
-   * by showing a login form, not :bw.exe.
+   * Ctrl+Shift+L or :bw.exe: this page's logins (and passkeys, if its login
+   * box is waiting for one) as rows; then paste or copy from the picked one.
    */
-  async choose(browser, auto, state = {}) {
+  async choose(browser) {
     let url = this.currentURL(browser);
-    await this.unlock(auto ? "bitwarden master password (Esc to skip):" : undefined, { auto });
+    await this.unlock();
     let logins = await this.logins(url);
     let waiting = Passkeys.waitingFor(browser);
     let passkeys = waiting ? await Passkeys.matches(waiting.request) : [];
     this.touch();
-    if (Breached.selectedBrowser !== browser) {
-      return;
-    }
     if (!logins.length && !passkeys.length) {
-      if (!auto) {
-        Breached.showMessage("No Bitwarden logins for this site", "error");
-      }
+      Breached.showMessage("No Bitwarden logins for this site", "error");
       return;
     }
-    if (!auto && logins.length == 1 && !passkeys.length) {
-      await this.fill(logins[0], browser);
-      return;
-    }
-    if (auto && this.busy()) {
-      return; // the command bar opened meanwhile: don't take it over
-    }
-    state.picking = true;
-    state.passkeys = !!waiting;
-    let picked = await Breached.pick("bitwarden:", [
-      ...passkeys.map(passkey => ({
-        label: Passkeys.userOf(passkey),
-        detail: `passkey, ${passkey.item.name}`,
-        passkey,
-      })),
-      ...logins.map(login => ({
-        label: login.login.username || "(no username)",
-        detail: login.name,
-        login,
-      })),
-    ]);
-    // Another tab may be showing by now. (The page itself may have changed
-    // or reloaded, as sign-in pages do: fill what's there now.)
+    let picked =
+      logins.length == 1 && !passkeys.length
+        ? { login: logins[0] }
+        : await Breached.pick("bitwarden:", [
+            ...passkeys.map(passkey => ({
+              label: Passkeys.userOf(passkey),
+              detail: `passkey, ${passkey.item.name}`,
+              passkey,
+            })),
+            ...logins.map(login => ({
+              label: login.login.username || "(no username)",
+              detail: login.name,
+              login,
+            })),
+          ]);
     if (!picked || Breached.selectedBrowser !== browser) {
       return;
     }
     if (picked.passkey) {
       await Passkeys.answerWaiting(Passkeys.waitingFor(browser) ?? waiting, picked.passkey);
-    } else {
-      state.login = picked.login;
-      await this.fill(picked.login, browser);
-    }
-  },
-
-  /** Whether the command bar is open (typing a command, or another question). */
-  busy() {
-    return !document.getElementById("commandbar").hidden;
-  },
-
-  // browser -> { page, open, picking, passkeys, password, login }: the
-  // login rows shown by themselves for its page, so each page gets them
-  // once, and the login picked there.
-  offered: new WeakMap(),
-
-  /**
-   * A page shows a login form ("form"), now with a password field
-   * ("password", like the second step of Google's sign-in), or its login
-   * box waits for a passkey ("passkey").
-   */
-  offer(browser, why, { fresh = false } = {}) {
-    if (Mod.pref("breached.mods.bitwarden.popup", "login") == "off" || browser !== Breached.selectedBrowser) {
       return;
     }
-    let page = topOf(browser)?.currentWindowGlobal?.innerWindowId;
-    let busy = this.busy();
-    let state = this.offered.get(browser);
-    if (fresh && state?.page == page && !state.open) {
-      state = null; // back on this page (Back/Forward): offer again
+    let { login } = picked.login;
+    let who = login.username || picked.login.name;
+    let actions = [];
+    if (login.username) {
+      actions.push({ label: "paste username", detail: login.username, paste: "username" });
     }
-    if (state?.page == page) {
-      if (why == "passkey" && state.open && state.picking && !state.passkeys) {
-        // Add the passkey to the rows still open.
-      } else if (why == "password" && !state.password) {
-        state.password = true;
-        if (state.login) {
-          // The account picked on the first step: its password goes here.
-          this.fill(state.login, browser);
-          return;
-        }
-        if (state.open) {
-          return; // the rows still open fill the password too
-        }
-        if (busy) {
-          return;
-        }
-      } else {
-        return;
-      }
+    if (login.password) {
+      actions.push({ label: "paste password", detail: "into the box you were in", paste: "password" });
+    }
+    if (login.totp) {
+      actions.push({ label: "paste two-step code", detail: "the current code", paste: "totp" });
+    }
+    if (login.username) {
+      actions.push({ label: "copy username", detail: login.username, copy: "username" });
+    }
+    if (login.password) {
+      actions.push({ label: "copy password", detail: "cleared from the clipboard after 30 seconds", copy: "password" });
+    }
+    if (login.totp) {
+      actions.push({ label: "copy two-step code", detail: "the current code", copy: "totp" });
+    }
+    let action = await Breached.pick(`${who}:`, actions);
+    if (!action || Breached.selectedBrowser !== browser) {
+      return;
+    }
+    let what = action.paste ?? action.copy;
+    let text = what == "totp" ? await this.totp(picked.login) : login[what];
+    let name = { username: "username", password: "password", totp: "two-step code" }[what];
+    if (action.paste) {
+      await this.paste(browser, text);
+      Breached.showMessage(`Pasted the ${name} of ${who}`);
     } else {
-      if (busy) {
-        return; // something else is being typed or asked
-      }
-      state = { page, password: why == "password" };
-      this.offered.set(browser, state);
+      this.copy(text, what != "username");
+      Breached.showMessage(`Copied the ${name} of ${who}`);
     }
-    state.open = true;
-    let run = (state.run = {});
-    this.choose(browser, true, state)
-      .catch(e => {
-        if (e.message != "cancelled") {
-          console.error("Bitwarden", e);
-          Breached.showMessage(`bw.exe: ${e.message}`, "error");
+  },
+
+  async totp(item) {
+    let r = await this.bw(["get", "totp", item.id]);
+    if (r.code != 0) {
+      throw new Error(r.stderr || "couldn't get the code");
+    }
+    return r.stdout;
+  },
+
+  /** Types text into the page's focused box, as a keyboard would. */
+  async paste(browser, text) {
+    browser.focus();
+    // Let the page get its focus back (the rows had it).
+    await new Promise(r => setTimeout(r, 150));
+    let tip = Cc["@mozilla.org/text-input-processor;1"].createInstance(Ci.nsITextInputProcessor);
+    if (!tip.beginInputTransaction(window, () => true)) {
+      throw new Error("couldn't type into the page");
+    }
+    tip.commitCompositionWith(text);
+  },
+
+  /** Copies text; a secret is cleared after 30 seconds if it's still there. */
+  copy(text, secret) {
+    let helper = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
+    helper.copyString(text);
+    if (secret) {
+      clearTimeout(this._clearTimer);
+      this._clearTimer = setTimeout(() => {
+        if (readClipboard() === text) {
+          helper.copyString("");
         }
-      })
-      .finally(() => {
-        if (state.run === run) {
-          state.open = false;
-        }
-      });
+      }, 30 * 1000);
+    }
   },
 };
+
+/**
+ * The PIN: the unlock key locked with a key made from the PIN (PBKDF2 and
+ * AES-GCM). Kept in memory, and in the profile if the setting says so.
+ */
+const Pin = {
+  PREF: "breached.mods.bitwarden.pinLocked",
+  _memory: null, // { salt, iv, data } as base64
+
+  keepAfterRestart() {
+    return Mod.pref("breached.mods.bitwarden.pin", "ask") == "restart";
+  },
+
+  stored() {
+    if (this._memory) {
+      return this._memory;
+    }
+    if (!this.keepAfterRestart()) {
+      return null;
+    }
+    try {
+      return JSON.parse(Mod.pref(this.PREF, "")) || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  has() {
+    return Mod.pref("breached.mods.bitwarden.pin", "ask") != "off" && !!this.stored();
+  },
+
+  async key(pin, salt) {
+    let base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt, iterations: 600000, hash: "SHA-256" },
+      base,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  },
+
+  async set(session, { offer }) {
+    let pin = await Breached.prompt(
+      offer ? "choose a PIN to unlock Bitwarden next time (Esc to skip):" : "new bitwarden PIN:",
+      { password: true }
+    );
+    if (!pin) {
+      return;
+    }
+    let again = await Breached.prompt("the PIN again:", { password: true });
+    if (again !== pin) {
+      Breached.showMessage("The PINs didn't match, so no PIN was set (:bw.exe pin to try again)", "error");
+      return;
+    }
+    let salt = crypto.getRandomValues(new Uint8Array(16));
+    let iv = crypto.getRandomValues(new Uint8Array(12));
+    let data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await this.key(pin, salt), new TextEncoder().encode(session));
+    this._memory = { salt: b64(salt), iv: b64(iv), data: b64(new Uint8Array(data)) };
+    if (this.keepAfterRestart()) {
+      Services.prefs.setStringPref(this.PREF, JSON.stringify(this._memory));
+    }
+    Breached.showMessage(
+      this.keepAfterRestart() ? "PIN set" : "PIN set (until Breached closes; then the master password again)"
+    );
+  },
+
+  /** Asks for the PIN; the unlock key, or null for "use the master password". */
+  async unlock() {
+    let stored = this.stored();
+    for (let tries = 0; tries < 3; tries++) {
+      let pin = await Breached.prompt(
+        tries ? "wrong PIN, try again:" : "bitwarden PIN (Esc for the master password):",
+        { password: true }
+      );
+      if (!pin) {
+        return null;
+      }
+      try {
+        let plain = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: unb64(stored.iv) },
+          await this.key(pin, unb64(stored.salt)),
+          unb64(stored.data)
+        );
+        return new TextDecoder().decode(plain);
+      } catch (e) {
+        // wrong PIN
+      }
+    }
+    this.forget();
+    Breached.showMessage("Three wrong PINs: the PIN is off until you unlock with the master password", "error");
+    return null;
+  },
+
+  forget() {
+    this._memory = null;
+    Services.prefs.clearUserPref(this.PREF);
+  },
+};
+
+const b64 = bytes => btoa(String.fromCharCode(...bytes));
+const unb64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 
 // The mod's modules by version, so an updated mod doesn't get the old
 // ones Gecko still holds from before (until Breached restarts).
@@ -511,8 +537,7 @@ const Passkeys = {
         }
       }
       let answer = new Promise(resolve => this.waiting.set(actor, { request, resolve, browser }));
-      // The page's login box offers passkeys: show them (with the logins).
-      Bitwarden.offer(browser, "passkey");
+      // The page's login box offers passkeys: Ctrl+Shift+L shows them.
       return answer;
     }
     if (!Bitwarden.session) {
@@ -695,14 +720,13 @@ const Passkeys = {
 };
 const { setHandler } = ChromeUtils.importESModule(Mod.url + "PasskeysParent.sys.mjs" + V);
 setHandler(window, Passkeys);
-const LoginForms = ChromeUtils.importESModule(Mod.url + "BitwardenParent.sys.mjs" + V);
-LoginForms.setHandler(window, Bitwarden);
 
 // With several windows open, an update reloads the mod in each window but
 // Breached keeps the page helpers the first window registered: those of
 // the old version. Register this version's instead.
 if (ModHost.Mods.bitwardenActors != Mod.info.version) {
   for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
+    // ("Bitwarden" was the login form helper before 1.6.)
     if (ModHost.Mods._actors?.has(name)) {
       try {
         ChromeUtils.unregisterWindowActor(name);
@@ -722,34 +746,23 @@ Mod.actor("BitwardenPasskeys", {
   events: { DOMDocElementInserted: { capture: true } },
 });
 
-/** The tab's page as it is now (after the tab moved to another process, say). */
-function topOf(browser) {
-  return (browser.browserId && BrowsingContext.getCurrentTopByBrowserId(browser.browserId)) || browser.browsingContext;
-}
-
-/** example.com for https://www.example.com/..., from an nsIURI. */
-function siteOf(uri) {
+/** The clipboard's text, or null. */
+function readClipboard() {
   try {
-    if (!uri || !/^https?$/.test(uri.scheme)) {
-      return null;
-    }
-    return Services.eTLD.getBaseDomain(uri);
+    let trans = Cc["@mozilla.org/widget/transferable;1"].createInstance(Ci.nsITransferable);
+    trans.init(null);
+    trans.addDataFlavor("text/plain");
+    Services.clipboard.getData(trans, Ci.nsIClipboard.kGlobalClipboard, window.browsingContext.currentWindowContext);
+    let data = {};
+    trans.getTransferData("text/plain", data);
+    return data.value?.QueryInterface(Ci.nsISupportsString).data ?? null;
   } catch (e) {
-    // an IP address or a single-word host
-    return uri?.host || null;
+    return null;
   }
 }
 
-const ACTOR = Mod.actor("Bitwarden", {
-  parent: "BitwardenParent.sys.mjs" + V,
-  child: "BitwardenChild.sys.mjs" + V,
-  // Pages with a login form show the vault's logins by themselves.
-  events: { DOMContentLoaded: {}, pageshow: {}, focusin: {} },
-  matches: ["http://*/*", "https://*/*"],
-});
-
 Mod.command("bw.exe", {
-  usage: "bw.exe [totp|sync|lock|login|status]  (fill this page's login from Bitwarden)",
+  usage: "bw.exe [totp|sync|lock|login|pin|status]  (paste or copy this site's login from Bitwarden; Ctrl+Shift+L)",
   run(args) {
     Bitwarden.run(args).catch(e => {
       if (e.message != "cancelled") {
@@ -760,11 +773,11 @@ Mod.command("bw.exe", {
   },
 });
 Mod.command("bw", { alias: "bw.exe" });
+Mod.key("l", "accel,shift", () => Breached.run("bw.exe"));
 Mod.onUnload(() => {
   Bitwarden.lock();
   for (let actor of [...Passkeys.waiting.keys()]) {
     Passkeys.forget(actor);
   }
   setHandler(window, null);
-  LoginForms.setHandler(window, null);
 });

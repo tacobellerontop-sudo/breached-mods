@@ -1,8 +1,8 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.5.8",
-  "description": "Fill logins from your Bitwarden vault: a page's login form shows them by itself (or use :bw.exe). Sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
+  "version": "1.6",
+  "description": "Paste or copy logins from your Bitwarden vault into any login box (Ctrl+Shift+L or :bw.exe), unlock with a PIN, and sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.7",
   "commands": [
@@ -18,26 +18,30 @@
       "type": "text"
     },
     {
-      "pref": "breached.mods.bitwarden.popup",
-      "label": "When a page has a login form",
-      "hint": "Bitwarden's logins for the site show as rows (it asks for your master password first if the vault is locked). Esc closes them; :bw.exe brings them back.",
-      "type": "choice",
-      "options": [
-        [
-          "login",
-          "Show Bitwarden's logins"
-        ],
-        [
-          "off",
-          "Only with :bw.exe"
-        ]
-      ]
-    },
-    {
       "pref": "breached.mods.bitwarden.lockMinutes",
       "label": "Lock the vault after this many idle minutes",
       "hint": "0 keeps it unlocked until you close Breached or run :bw.exe lock.",
       "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.pin",
+      "label": "Unlocking with a PIN",
+      "hint": "After the master password, Bitwarden offers to set a PIN (:bw.exe pin changes it). The PIN is used when the vault has locked itself. Three wrong PINs turn it off.",
+      "type": "choice",
+      "options": [
+        [
+          "ask",
+          "Offer a PIN; the master password again after Breached restarts"
+        ],
+        [
+          "restart",
+          "Offer a PIN that also works after a restart (kept, locked, in your profile)"
+        ],
+        [
+          "off",
+          "No PIN"
+        ]
+      ]
     },
     {
       "pref": "breached.mods.bitwarden.passkeys",
