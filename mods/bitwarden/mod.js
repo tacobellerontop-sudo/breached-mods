@@ -292,31 +292,56 @@ const Bitwarden = {
     if (picked.passkey) {
       await Passkeys.answerWaiting(Passkeys.waitingFor(browser) ?? waiting, picked.passkey);
     } else {
+      state.login = picked.login;
       await this.fill(picked.login, browser);
     }
   },
 
-  // browser -> { page, picking, passkeys }: the login rows shown by
-  // themselves for its page, so each page gets them once.
+  // browser -> { page, open, picking, passkeys, password, login }: the
+  // login rows shown by themselves for its page, so each page gets them
+  // once, and the login picked there.
   offered: new WeakMap(),
 
-  /** A page shows a login form ("form") or its login box waits for a passkey ("passkey"). */
+  /**
+   * A page shows a login form ("form"), now with a password field
+   * ("password", like the second step of Google's sign-in), or its login
+   * box waits for a passkey ("passkey").
+   */
   offer(browser, why) {
     if (Mod.pref("breached.mods.bitwarden.popup", "login") == "off" || browser !== Breached.selectedBrowser) {
       return;
     }
     let page = browser.browsingContext?.currentWindowGlobal?.innerWindowId;
-    let last = this.offered.get(browser);
-    if (last?.page == page) {
-      // Shown already; once more only to add a passkey to rows still open.
-      if (!(why == "passkey" && last.open && last.picking && !last.passkeys)) {
+    let busy = !document.getElementById("commandbar").hidden;
+    let state = this.offered.get(browser);
+    if (state?.page == page) {
+      if (why == "passkey" && state.open && state.picking && !state.passkeys) {
+        // Add the passkey to the rows still open.
+      } else if (why == "password" && !state.password) {
+        state.password = true;
+        if (state.login) {
+          // The account picked on the first step: its password goes here.
+          this.fill(state.login, browser);
+          return;
+        }
+        if (state.open) {
+          return; // the rows still open fill the password too
+        }
+        if (busy) {
+          return;
+        }
+      } else {
         return;
       }
-    } else if (!document.getElementById("commandbar").hidden) {
-      return; // something else is being typed or asked
+    } else {
+      if (busy) {
+        return; // something else is being typed or asked
+      }
+      state = { page, password: why == "password" };
+      this.offered.set(browser, state);
     }
-    let state = { page, open: true };
-    this.offered.set(browser, state);
+    state.open = true;
+    let run = (state.run = {});
     this.choose(browser, true, state)
       .catch(e => {
         if (e.message != "cancelled") {
@@ -324,11 +349,19 @@ const Bitwarden = {
           Breached.showMessage(`bw.exe: ${e.message}`, "error");
         }
       })
-      .finally(() => (state.open = false));
+      .finally(() => {
+        if (state.run === run) {
+          state.open = false;
+        }
+      });
   },
 };
 
-const PasskeyCrypto = ChromeUtils.importESModule(Mod.url + "PasskeyCrypto.sys.mjs");
+// The mod's modules by version, so an updated mod doesn't get the old
+// ones Gecko still holds from before (until Breached restarts).
+const V = "?v=" + Mod.info.version;
+
+const PasskeyCrypto = ChromeUtils.importESModule(Mod.url + "PasskeyCrypto.sys.mjs" + V);
 
 /** Passkeys from the vault, for BitwardenPasskeysParent. */
 const Passkeys = {
@@ -583,14 +616,14 @@ const Passkeys = {
     entry?.resolve(null);
   },
 };
-const { setHandler } = ChromeUtils.importESModule(Mod.url + "PasskeysParent.sys.mjs");
+const { setHandler } = ChromeUtils.importESModule(Mod.url + "PasskeysParent.sys.mjs" + V);
 setHandler(window, Passkeys);
-const LoginForms = ChromeUtils.importESModule(Mod.url + "BitwardenParent.sys.mjs");
+const LoginForms = ChromeUtils.importESModule(Mod.url + "BitwardenParent.sys.mjs" + V);
 LoginForms.setHandler(window, Bitwarden);
 
 Mod.actor("BitwardenPasskeys", {
-  parent: "PasskeysParent.sys.mjs",
-  child: "PasskeysChild.sys.mjs",
+  parent: "PasskeysParent.sys.mjs" + V,
+  child: "PasskeysChild.sys.mjs" + V,
   // When the page's root element arrives, before its scripts run (like Firefox's about: pages).
   events: { DOMDocElementInserted: { capture: true } },
 });
@@ -607,8 +640,8 @@ function siteOf(principal) {
 }
 
 const ACTOR = Mod.actor("Bitwarden", {
-  parent: "BitwardenParent.sys.mjs",
-  child: "BitwardenChild.sys.mjs",
+  parent: "BitwardenParent.sys.mjs" + V,
+  child: "BitwardenChild.sys.mjs" + V,
   // Pages with a login form show the vault's logins by themselves.
   events: { DOMContentLoaded: {}, pageshow: {}, focusin: {} },
   matches: ["http://*/*", "https://*/*"],

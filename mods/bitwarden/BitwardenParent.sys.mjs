@@ -18,7 +18,7 @@ export class BitwardenParent extends JSWindowActorParent {
   receiveMessage(message) {
     if (message.name == "Bitwarden:LoginForm") {
       let browser = this.browsingContext.top.embedderElement;
-      handlers.get(this.browsingContext.topChromeWindow)?.offer(browser, "form");
+      handlers.get(this.browsingContext.topChromeWindow)?.offer(browser, message.data.kind == "password" ? "password" : "form");
     }
     return null;
   }

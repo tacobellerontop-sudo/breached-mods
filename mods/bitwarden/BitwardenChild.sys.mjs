@@ -33,6 +33,16 @@ function allInputs(root, out = []) {
 }
 
 const isPassword = i => i.type == "password" && !/new-password/.test(i.autocomplete);
+// A password field a person can see and type in: not a page's hidden
+// helper field (Google's sign-in keeps one, out of sight, next to the email).
+function realPassword(input) {
+  if (!isPassword(input) || input.tabIndex < 0 || input.getAttribute("aria-hidden") == "true") {
+    return false;
+  }
+  let r = input.getBoundingClientRect();
+  return r.width > 2 && r.height > 2;
+}
+
 // A username field that says so (a page's other text fields could be anything).
 const isLoginUser = i => USER_TYPES.has(i.type) && /username|webauthn/.test(i.autocomplete);
 
@@ -48,13 +58,17 @@ export class BitwardenChild extends JSWindowActorChild {
   }
 
   handleEvent(event) {
-    if (this._told) {
+    if (this._toldPassword) {
       return;
     }
     if (event.type == "focusin") {
       let target = event.composedTarget ?? event.target;
-      if (target?.localName == "input" && (isPassword(target) || isLoginUser(target))) {
-        this.tell();
+      if (target?.localName == "input" && usable(target)) {
+        if (realPassword(target)) {
+          this.tell("password");
+        } else if (isLoginUser(target) && !this._told) {
+          this.tell("form");
+        }
       }
       return;
     }
@@ -72,19 +86,23 @@ export class BitwardenChild extends JSWindowActorChild {
     } catch (e) {
       return; // the actor is gone
     }
-    if (this._told || !doc) {
+    if (this._toldPassword || !doc) {
       return;
     }
     let inputs = allInputs(doc).filter(usable);
-    if (inputs.some(isPassword) || inputs.some(isLoginUser)) {
-      this.tell();
+    if (inputs.some(realPassword)) {
+      this.tell("password");
+    } else if (!this._told && inputs.some(isLoginUser)) {
+      this.tell("form");
     }
   }
 
-  tell() {
+  /** "form": a login form; "password": (now) with a password field, e.g. a sign-in's second step. */
+  tell(kind) {
     this._told = true;
+    this._toldPassword ||= kind == "password";
     try {
-      this.sendAsyncMessage("Bitwarden:LoginForm", {});
+      this.sendAsyncMessage("Bitwarden:LoginForm", { kind });
     } catch (e) {
       // the page went away
     }
@@ -96,7 +114,7 @@ export class BitwardenChild extends JSWindowActorChild {
       return false;
     }
     let inputs = allInputs(doc).filter(usable);
-    let passwords = inputs.filter(isPassword);
+    let passwords = inputs.filter(realPassword);
     let texts = inputs.filter(i => USER_TYPES.has(i.type));
     let focused = doc.activeElement;
     while (focused?.shadowRoot?.activeElement) {
