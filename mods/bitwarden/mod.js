@@ -99,13 +99,16 @@ const Bitwarden = {
   },
 
   /** Makes sure the vault is unlocked, asking for the master password. */
-  async unlock(label = "bitwarden master password:") {
+  async unlock(label = "bitwarden master password:", { auto = false } = {}) {
     let status = await this.status();
     if (status == "unauthenticated") {
       throw new Error("not logged in: run :bw.exe login (or bw login in a terminal)");
     }
     if (status == "unlocked" && this.session) {
       return;
+    }
+    if (auto && Bitwarden.busy()) {
+      throw new Error("cancelled"); // don't take over what's being typed
     }
     let password = await Breached.prompt(label, { password: true });
     if (!password) {
@@ -251,7 +254,7 @@ const Bitwarden = {
    */
   async choose(browser, auto, state = {}) {
     let url = this.currentURL(browser);
-    await this.unlock(auto ? "bitwarden master password (Esc to skip):" : undefined);
+    await this.unlock(auto ? "bitwarden master password (Esc to skip):" : undefined, { auto });
     let logins = await this.logins(url);
     let waiting = Passkeys.waitingFor(browser);
     let passkeys = waiting ? await Passkeys.matches(waiting.request) : [];
@@ -268,6 +271,9 @@ const Bitwarden = {
     if (!auto && logins.length == 1 && !passkeys.length) {
       await this.fill(logins[0], browser);
       return;
+    }
+    if (auto && this.busy()) {
+      return; // the command bar opened meanwhile: don't take it over
     }
     state.picking = true;
     state.passkeys = !!waiting;
@@ -297,6 +303,11 @@ const Bitwarden = {
     }
   },
 
+  /** Whether the command bar is open (typing a command, or another question). */
+  busy() {
+    return !document.getElementById("commandbar").hidden;
+  },
+
   // browser -> { page, open, picking, passkeys, password, login }: the
   // login rows shown by themselves for its page, so each page gets them
   // once, and the login picked there.
@@ -312,7 +323,7 @@ const Bitwarden = {
       return;
     }
     let page = browser.browsingContext?.currentWindowGlobal?.innerWindowId;
-    let busy = !document.getElementById("commandbar").hidden;
+    let busy = this.busy();
     let state = this.offered.get(browser);
     if (state?.page == page) {
       if (why == "passkey" && state.open && state.picking && !state.passkeys) {
