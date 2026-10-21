@@ -32,7 +32,10 @@ function allInputs(root, out = []) {
   return out;
 }
 
-const isPassword = i => i.type == "password" && !/new-password/.test(i.autocomplete);
+// The page's own autocomplete words (the .autocomplete property comes back
+// empty for some, such as Google's "username webauthn").
+const hints = i => (i.getAttribute("autocomplete") ?? "").toLowerCase();
+const isPassword = i => i.type == "password" && !/new-password/.test(hints(i));
 // A password field a person can see and type in: not a page's hidden
 // helper field (Google's sign-in keeps one, out of sight, next to the email).
 function realPassword(input) {
@@ -44,7 +47,7 @@ function realPassword(input) {
 }
 
 // A username field that says so (a page's other text fields could be anything).
-const isLoginUser = i => USER_TYPES.has(i.type) && /username|webauthn/.test(i.autocomplete);
+const isLoginUser = i => USER_TYPES.has(i.type) && /username|webauthn/.test(hints(i));
 
 /** Whether this element comes before that one in the page. */
 const before = (a, b) => !!(a.compareDocumentPosition(b) & a.DOCUMENT_POSITION_FOLLOWING);
@@ -137,7 +140,7 @@ export class BitwardenChild extends JSWindowActorChild {
     if (!user && !pass) {
       // A username-only first step.
       user =
-        texts.find(i => /username|email/.test(i.autocomplete)) ??
+        texts.find(i => /username|email/.test(hints(i))) ??
         texts.find(i => i.type == "email") ??
         texts.find(i => USER_HINT.test(i.name + " " + i.id));
     }
