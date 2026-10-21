@@ -1,7 +1,7 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Fill logins from your Bitwarden vault: a page's login form shows them by itself (or use :bw.exe). Sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.7",

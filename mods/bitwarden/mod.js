@@ -172,10 +172,11 @@ const Bitwarden = {
   /** Fills a login into the page's frames from the same site (or the login's own sites). */
   async fill(item, browser = Breached.selectedBrowser) {
     let top = browser.browsingContext;
-    let sites = new Set([siteOf(top.currentWindowGlobal?.documentPrincipal)]);
+    // The page itself always; its frames from the same site or the login's own sites.
+    let sites = new Set([siteOf(browser.currentURI), siteOf(top.currentWindowGlobal?.documentURI)]);
     for (let { uri } of item.login.uris ?? []) {
       try {
-        sites.add(siteOf(Services.scriptSecurityManager.createContentPrincipal(Services.io.newURI(uri), {})));
+        sites.add(siteOf(Services.io.newURI(uri)));
       } catch (e) {
         // not a web address
       }
@@ -193,7 +194,7 @@ const Bitwarden = {
       seen = [];
       for (let bc of top.getAllBrowsingContextsInSubtree()) {
         let wg = bc.currentWindowGlobal;
-        if (!wg || !sites.has(siteOf(wg.documentPrincipal))) {
+        if (!wg || (bc != top && !sites.has(siteOf(wg.documentURI)))) {
           continue;
         }
         try {
@@ -215,7 +216,10 @@ const Bitwarden = {
       Breached.showMessage(`Filled ${who}`);
     } else {
       let found = [...problems, ...seen];
-      let why = found.length ? found.join("; ") : `no frames from ${[...sites].join(", ") || "a website"}`;
+      let why = found.length
+        ? found.join("; ")
+        : `no frames from ${[...sites].join(", ") || "a website"}: page ${browser.currentURI?.spec?.replace(/[?#].*/, "")}, ` +
+          `${top.getAllBrowsingContextsInSubtree().length} frames, top ${top.currentWindowGlobal ? "loaded" : "not loaded"}`;
       Breached.showMessage(`No login form found for ${who} (Bitwarden ${Mod.info.version}; ${why})`, "error");
       console.error("Bitwarden: nothing filled", [...sites], found);
     }
@@ -661,14 +665,16 @@ Mod.actor("BitwardenPasskeys", {
   events: { DOMDocElementInserted: { capture: true } },
 });
 
-function siteOf(principal) {
+/** example.com for https://www.example.com/..., from an nsIURI. */
+function siteOf(uri) {
   try {
-    if (!principal || !/^https?$/.test(principal.scheme)) {
+    if (!uri || !/^https?$/.test(uri.scheme)) {
       return null;
     }
-    return principal.baseDomain || principal.host;
+    return Services.eTLD.getBaseDomain(uri);
   } catch (e) {
-    return null;
+    // an IP address or a single-word host
+    return uri?.host || null;
   }
 }
 
