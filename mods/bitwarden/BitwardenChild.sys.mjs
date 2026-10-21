@@ -57,6 +57,15 @@ export class BitwardenChild extends JSWindowActorChild {
     if (message.name == "Bitwarden:Fill") {
       return this.fill(message.data);
     }
+    if (message.name == "Bitwarden:Ping") {
+      let doc = this.document;
+      return {
+        module: import.meta.url.replace(/^.*\//, ""),
+        url: doc?.documentURI?.replace(/[?#].*/, ""),
+        ready: doc?.readyState,
+        fields: doc ? allInputs(doc).filter(i => i.type != "hidden").length : 0,
+      };
+    }
     return undefined;
   }
 

@@ -239,6 +239,9 @@ const Bitwarden = {
       case "login":
         await this.login();
         return;
+      case "check":
+        await this.check();
+        return;
       case "status": {
         let status = await this.status();
         Breached.showMessage(`Bitwarden: ${status == "unlocked" && !this.session ? "locked" : status}`);
@@ -269,9 +272,43 @@ const Bitwarden = {
       }
     }
     if (sub) {
-      throw new Error(`unknown: ${sub} (try fill, lock, sync, totp, login, status)`);
+      throw new Error(`unknown: ${sub} (try lock, sync, totp, login, status, check)`);
     }
     await this.choose(Breached.selectedBrowser, false);
+  },
+
+  /** :bw.exe check: shows whether this tab's page answers, as rows to read. */
+  async check() {
+    let browser = Breached.selectedBrowser;
+    let top = topOf(browser);
+    let lines = [];
+    let line = (label, detail) => lines.push({ label, detail: String(detail) });
+    line("mod", `Bitwarden ${Mod.info.version}, Breached ${Breached.version ?? ""}`);
+    line("page", browser.currentURI?.spec?.replace(/[?#].*/, ""));
+    line("windows", [...Services.wm.getEnumerator(null)].length);
+    line("mods on", [...ModHost.loaded.keys()].join(", "));
+    let ublock = WebExtensionPolicy.getByID("uBlock0@raymondhill.net");
+    line("uBlock", ublock ? "on" : "off");
+    let wg = top?.currentWindowGlobal;
+    line("frames", `${top?.getAllBrowsingContextsInSubtree().length ?? 0}, top ${wg ? "loaded" : "not loaded"}, process ${wg?.osPid ?? "?"}`);
+    let ask = async (actor, name) => {
+      let start = Date.now();
+      try {
+        let r = await Promise.race([
+          wg.getActor(actor).sendQuery(name, {}),
+          new Promise((resolve, reject) => setTimeout(() => reject(new Error("no answer in 5s")), 5000)),
+        ]);
+        return `${Date.now() - start} ms: ${typeof r == "object" ? JSON.stringify(r) : r}`;
+      } catch (e) {
+        return `${Date.now() - start} ms: ${e.message ?? e}`;
+      }
+    };
+    if (wg) {
+      let [core, own] = await Promise.all([ask("Breached", "Breached:Ping"), ask(ACTOR, "Bitwarden:Ping")]);
+      line("Breached's page helper", core);
+      line("Bitwarden's page helper", own);
+    }
+    await Breached.pick("bitwarden check (take a screenshot):", lines);
   },
 
   /**
@@ -660,6 +697,23 @@ const { setHandler } = ChromeUtils.importESModule(Mod.url + "PasskeysParent.sys.
 setHandler(window, Passkeys);
 const LoginForms = ChromeUtils.importESModule(Mod.url + "BitwardenParent.sys.mjs" + V);
 LoginForms.setHandler(window, Bitwarden);
+
+// With several windows open, an update reloads the mod in each window but
+// Breached keeps the page helpers the first window registered: those of
+// the old version. Register this version's instead.
+if (ModHost.Mods.bitwardenActors != Mod.info.version) {
+  for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
+    if (ModHost.Mods._actors?.has(name)) {
+      try {
+        ChromeUtils.unregisterWindowActor(name);
+      } catch (e) {
+        // not registered
+      }
+      ModHost.Mods._actors.delete(name);
+    }
+  }
+  ModHost.Mods.bitwardenActors = Mod.info.version;
+}
 
 Mod.actor("BitwardenPasskeys", {
   parent: "PasskeysParent.sys.mjs" + V,
