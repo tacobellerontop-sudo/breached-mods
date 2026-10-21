@@ -34,18 +34,29 @@ function originOf(principal) {
   return principal.originNoSuffix;
 }
 
+const wrapped = new WeakSet(); // windows done
+
 export class BitwardenPasskeysChild extends JSWindowActorChild {
   handleEvent(event) {
-    if (event.type != "DOMDocElementInserted") {
+    // The page's root element arrived (before its scripts run), or a new
+    // window: also the blank one a fresh frame starts with, which some
+    // sites (Google's sign-in) take untouched browser functions from.
+    if (event.type != "DOMDocElementInserted" && event.type != "DOMWindowCreated") {
       return;
     }
     if (Services.prefs.getStringPref("breached.mods.bitwarden.passkeys", "ask") == "off") {
       return;
     }
     let win = this.contentWindow;
-    if (!win?.isSecureContext || !/^https?:$/.test(win.location.protocol)) {
+    let principal = this.document?.nodePrincipal;
+    // A blank frame has its page's origin, so its address isn't checked.
+    if (!win?.isSecureContext || !principal?.isContentPrincipal || !/^https?$/.test(principal.scheme)) {
       return;
     }
+    if (wrapped.has(win)) {
+      return;
+    }
+    wrapped.add(win);
     let container = win.navigator.credentials;
     if (!container) {
       return;

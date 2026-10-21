@@ -743,7 +743,7 @@ Mod.actor("BitwardenPasskeys", {
   parent: "PasskeysParent.sys.mjs" + V,
   child: "PasskeysChild.sys.mjs" + V,
   // When the page's root element arrives, before its scripts run (like Firefox's about: pages).
-  events: { DOMDocElementInserted: { capture: true } },
+  events: { DOMDocElementInserted: { capture: true }, DOMWindowCreated: {} },
 });
 
 /** The clipboard's text, or null. */
