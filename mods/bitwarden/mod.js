@@ -183,12 +183,14 @@ const Bitwarden = {
     sites.delete(null);
     let filled = false;
     let problems = [];
+    let seen = [];
     // A page that's still drawing its form (after a reload, say) gets a few tries.
     for (let attempt = 0; attempt < 5 && !filled; attempt++) {
       if (attempt) {
         await new Promise(r => setTimeout(r, 500));
       }
       problems = [];
+      seen = [];
       for (let bc of top.getAllBrowsingContextsInSubtree()) {
         let wg = bc.currentWindowGlobal;
         if (!wg || !sites.has(siteOf(wg.documentPrincipal))) {
@@ -199,7 +201,10 @@ const Bitwarden = {
             username: item.login.username ?? "",
             password: item.login.password ?? "",
           });
-          filled ||= r;
+          filled ||= r?.filled ?? r === true;
+          if (!r?.filled) {
+            seen.push(`${r?.url ?? wg.documentURI?.prePath}: ${r?.seen?.length ? r.seen.join(", ") : "no fields"}`);
+          }
         } catch (e) {
           problems.push(`${wg.documentURI?.prePath}: ${e.message ?? e}`);
         }
@@ -209,9 +214,10 @@ const Bitwarden = {
     if (filled) {
       Breached.showMessage(`Filled ${who}`);
     } else {
-      let why = problems.length ? ` (${problems.join("; ")})` : "";
-      Breached.showMessage(`No login form found for ${who}${why}`, "error");
-      console.error("Bitwarden: nothing filled", [...sites], problems);
+      let found = [...problems, ...seen];
+      let why = found.length ? found.join("; ") : `no frames from ${[...sites].join(", ") || "a website"}`;
+      Breached.showMessage(`No login form found for ${who} (Bitwarden ${Mod.info.version}; ${why})`, "error");
+      console.error("Bitwarden: nothing filled", [...sites], found);
     }
   },
 

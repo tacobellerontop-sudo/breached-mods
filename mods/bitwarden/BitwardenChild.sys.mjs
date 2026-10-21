@@ -117,11 +117,19 @@ export class BitwardenChild extends JSWindowActorChild {
     }
   }
 
-  fill({ username, password }) {
+  /** Fills; returns whether it did, and what it saw (for "no login form" messages). */
+  fill(data) {
     let doc = this.document;
-    if (!doc) {
-      return false;
-    }
+    let all = doc ? allInputs(doc) : [];
+    let filled = doc ? this.fillIn(doc, data) : false;
+    let seen = all.filter(i => i.type != "hidden").map(i => {
+      let hint = i.getAttribute("autocomplete") || i.name || i.id;
+      return `${i.type}${hint ? " " + hint : ""}${usable(i) ? "" : " (hidden)"}`;
+    });
+    return { filled, seen, url: doc?.documentURI?.replace(/[?#].*/, "") };
+  }
+
+  fillIn(doc, { username, password }) {
     let inputs = allInputs(doc).filter(usable);
     let passwords = inputs.filter(realPassword);
     let texts = inputs.filter(i => USER_TYPES.has(i.type));
