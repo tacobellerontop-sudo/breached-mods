@@ -171,7 +171,7 @@ const Bitwarden = {
 
   /** Fills a login into the page's frames from the same site (or the login's own sites). */
   async fill(item, browser = Breached.selectedBrowser) {
-    let top = browser.browsingContext;
+    let top = topOf(browser);
     // The page itself always; its frames from the same site or the login's own sites.
     let sites = new Set([siteOf(browser.currentURI), siteOf(top.currentWindowGlobal?.documentURI)]);
     for (let { uri } of item.login.uris ?? []) {
@@ -198,10 +198,13 @@ const Bitwarden = {
           continue;
         }
         try {
-          let r = await wg.getActor(ACTOR).sendQuery("Bitwarden:Fill", {
-            username: item.login.username ?? "",
-            password: item.login.password ?? "",
-          });
+          let r = await Promise.race([
+            wg.getActor(ACTOR).sendQuery("Bitwarden:Fill", {
+              username: item.login.username ?? "",
+              password: item.login.password ?? "",
+            }),
+            new Promise((resolve, reject) => setTimeout(() => reject(new Error("the page didn't answer")), 3000)),
+          ]);
           filled ||= r?.filled ?? r === true;
           if (!r?.filled) {
             seen.push(`${r?.url ?? wg.documentURI?.prePath}: ${r?.seen?.length ? r.seen.join(", ") : "no fields"}`);
@@ -345,7 +348,7 @@ const Bitwarden = {
     if (Mod.pref("breached.mods.bitwarden.popup", "login") == "off" || browser !== Breached.selectedBrowser) {
       return;
     }
-    let page = browser.browsingContext?.currentWindowGlobal?.innerWindowId;
+    let page = topOf(browser)?.currentWindowGlobal?.innerWindowId;
     let busy = this.busy();
     let state = this.offered.get(browser);
     if (fresh && state?.page == page && !state.open) {
@@ -664,6 +667,11 @@ Mod.actor("BitwardenPasskeys", {
   // When the page's root element arrives, before its scripts run (like Firefox's about: pages).
   events: { DOMDocElementInserted: { capture: true } },
 });
+
+/** The tab's page as it is now (after the tab moved to another process, say). */
+function topOf(browser) {
+  return (browser.browserId && BrowsingContext.getCurrentTopByBrowserId(browser.browserId)) || browser.browsingContext;
+}
 
 /** example.com for https://www.example.com/..., from an nsIURI. */
 function siteOf(uri) {
