@@ -1,10 +1,10 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.6.2",
-  "description": "Paste or copy logins from your Bitwarden vault into any login box (Ctrl+Shift+L or :bw.exe), unlock with a PIN, and sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
+  "version": "1.7.0",
+  "description": "Paste or copy logins from your Bitwarden vault into any login box (Ctrl+Shift+L or :bw.exe), unlock with a PIN, and sign in with passkeys kept there: Breached answers passkey requests itself instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
-  "breached": "0.1.7",
+  "breached": "0.1.15",
   "commands": [
     "bw.exe",
     "bw"
@@ -45,17 +45,13 @@
     },
     {
       "pref": "breached.mods.bitwarden.passkeys",
-      "label": "When a site asks for a passkey",
-      "hint": "Bitwarden's passkeys for the site show as rows to pick from, or the only one is used without asking. New passkeys can be kept in Bitwarden either way.",
+      "label": "Passkeys",
+      "hint": "Breached answers sites' passkey requests with the passkeys in your vault (loaded when you unlock it), and keeps new ones there. Off leaves passkeys to Windows Hello and security keys.",
       "type": "choice",
       "options": [
         [
-          "ask",
-          "Show Bitwarden's passkeys to pick from"
-        ],
-        [
-          "auto",
-          "Use Bitwarden's passkey without asking when there's one"
+          "on",
+          "Use Bitwarden's passkeys (instead of Windows)"
         ],
         [
           "off",
