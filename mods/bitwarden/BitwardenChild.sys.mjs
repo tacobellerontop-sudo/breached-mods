@@ -61,6 +61,11 @@ export class BitwardenChild extends JSWindowActorChild {
   }
 
   handleEvent(event) {
+    if (event.type == "pageshow" && event.persisted) {
+      // Back on this page from the back-forward cache: offer again.
+      this._told = this._toldPassword = false;
+      this._fresh = true;
+    }
     if (this._toldPassword) {
       return;
     }
@@ -105,7 +110,8 @@ export class BitwardenChild extends JSWindowActorChild {
     this._told = true;
     this._toldPassword ||= kind == "password";
     try {
-      this.sendAsyncMessage("Bitwarden:LoginForm", { kind });
+      this.sendAsyncMessage("Bitwarden:LoginForm", { kind, fresh: !!this._fresh });
+      this._fresh = false;
     } catch (e) {
       // the page went away
     }

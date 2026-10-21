@@ -182,23 +182,37 @@ const Bitwarden = {
     }
     sites.delete(null);
     let filled = false;
-    for (let bc of top.getAllBrowsingContextsInSubtree()) {
-      let wg = bc.currentWindowGlobal;
-      if (!wg || !sites.has(siteOf(wg.documentPrincipal))) {
-        continue;
+    let problems = [];
+    // A page that's still drawing its form (after a reload, say) gets a few tries.
+    for (let attempt = 0; attempt < 5 && !filled; attempt++) {
+      if (attempt) {
+        await new Promise(r => setTimeout(r, 500));
       }
-      try {
-        let r = await wg.getActor(ACTOR).sendQuery("Bitwarden:Fill", {
-          username: item.login.username ?? "",
-          password: item.login.password ?? "",
-        });
-        filled ||= r;
-      } catch (e) {
-        // frame went away
+      problems = [];
+      for (let bc of top.getAllBrowsingContextsInSubtree()) {
+        let wg = bc.currentWindowGlobal;
+        if (!wg || !sites.has(siteOf(wg.documentPrincipal))) {
+          continue;
+        }
+        try {
+          let r = await wg.getActor(ACTOR).sendQuery("Bitwarden:Fill", {
+            username: item.login.username ?? "",
+            password: item.login.password ?? "",
+          });
+          filled ||= r;
+        } catch (e) {
+          problems.push(`${wg.documentURI?.prePath}: ${e.message ?? e}`);
+        }
       }
     }
     let who = item.login.username || item.name;
-    Breached.showMessage(filled ? `Filled ${who}` : `No login form found for ${who}`, filled ? "info" : "error");
+    if (filled) {
+      Breached.showMessage(`Filled ${who}`);
+    } else {
+      let why = problems.length ? ` (${problems.join("; ")})` : "";
+      Breached.showMessage(`No login form found for ${who}${why}`, "error");
+      console.error("Bitwarden: nothing filled", [...sites], problems);
+    }
   },
 
   async run(args) {
@@ -277,7 +291,6 @@ const Bitwarden = {
     }
     state.picking = true;
     state.passkeys = !!waiting;
-    let page = browser.browsingContext.currentWindowGlobal;
     let picked = await Breached.pick("bitwarden:", [
       ...passkeys.map(passkey => ({
         label: Passkeys.userOf(passkey),
@@ -290,9 +303,9 @@ const Bitwarden = {
         login,
       })),
     ]);
-    // Another page may be showing by now (the same page changing its
-    // address, as many sign-in pages do, is fine).
-    if (!picked || Breached.selectedBrowser !== browser || browser.browsingContext.currentWindowGlobal !== page) {
+    // Another tab may be showing by now. (The page itself may have changed
+    // or reloaded, as sign-in pages do: fill what's there now.)
+    if (!picked || Breached.selectedBrowser !== browser) {
       return;
     }
     if (picked.passkey) {
@@ -318,13 +331,16 @@ const Bitwarden = {
    * ("password", like the second step of Google's sign-in), or its login
    * box waits for a passkey ("passkey").
    */
-  offer(browser, why) {
+  offer(browser, why, { fresh = false } = {}) {
     if (Mod.pref("breached.mods.bitwarden.popup", "login") == "off" || browser !== Breached.selectedBrowser) {
       return;
     }
     let page = browser.browsingContext?.currentWindowGlobal?.innerWindowId;
     let busy = this.busy();
     let state = this.offered.get(browser);
+    if (fresh && state?.page == page && !state.open) {
+      state = null; // back on this page (Back/Forward): offer again
+    }
     if (state?.page == page) {
       if (why == "passkey" && state.open && state.picking && !state.passkeys) {
         // Add the passkey to the rows still open.
