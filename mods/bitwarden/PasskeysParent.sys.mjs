@@ -26,6 +26,12 @@ export class BitwardenPasskeysParent extends JSWindowActorParent {
   receiveMessage(message) {
     if (message.name == "Passkey:Error") {
       log("page side: " + message.data.message);
+      if (message.data.show) {
+        this.browsingContext.topChromeWindow?.Breached?.showMessage(
+          `Bitwarden couldn't read this page's passkey request, so Windows gets it (${message.data.message})`,
+          "error"
+        );
+      }
       return null;
     }
     let browser = this.browsingContext.top.embedderElement;

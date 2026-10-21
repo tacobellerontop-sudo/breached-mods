@@ -1,8 +1,8 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.3",
-  "description": "Fill logins from your Bitwarden vault with :bw.exe, and sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
+  "version": "1.4",
+  "description": "Fill logins from your Bitwarden vault: a page's login form shows them by itself (or use :bw.exe). Sign in to sites with passkeys kept there, using the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.7",
   "commands": [
@@ -16,6 +16,22 @@
       "hint": "Leave empty to find bw.exe on your PATH.",
       "placeholder": "C:\\Tools\\bw.exe",
       "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.popup",
+      "label": "When a page has a login form",
+      "hint": "Bitwarden's logins for the site show as rows (it asks for your master password first if the vault is locked). Esc closes them; :bw.exe brings them back.",
+      "type": "choice",
+      "options": [
+        [
+          "login",
+          "Show Bitwarden's logins"
+        ],
+        [
+          "off",
+          "Only with :bw.exe"
+        ]
+      ]
     },
     {
       "pref": "breached.mods.bitwarden.lockMinutes",

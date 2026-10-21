@@ -53,31 +53,42 @@ export class BitwardenPasskeysChild extends JSWindowActorChild {
     let proto = win.CredentialsContainer.prototype;
     let nativeGet = proto.get;
     let nativeCreate = proto.create;
-    Cu.exportFunction(options => this.ask(win, "get", options, () => nativeGet.call(container, options)), container, {
-      defineAs: "get",
-    });
-    Cu.exportFunction(
-      options => this.ask(win, "create", options, () => nativeCreate.call(container, options)),
-      container,
-      { defineAs: "create" }
-    );
+    let get = options => this.ask(win, "get", options, () => nativeGet.call(container, options));
+    let create = options => this.ask(win, "create", options, () => nativeCreate.call(container, options));
+    // On navigator.credentials and on its prototype, for pages that call
+    // CredentialsContainer.prototype.get.call(...) or keep the method.
+    for (let target of [container, proto]) {
+      Cu.exportFunction(get, target, { defineAs: "get" });
+      Cu.exportFunction(create, target, { defineAs: "create" });
+    }
   }
 
   /** Answers get() or create(); native() hands it back to Gecko. */
   ask(win, kind, options, native) {
-    let publicKey = options?.publicKey;
+    // The page's own view of its options: objects of its own classes (or
+    // with getters) look empty through the usual chrome wrapper.
+    let page = options == null ? null : Cu.waiveXrays(options);
+    let publicKey;
+    try {
+      publicKey = page?.publicKey;
+    } catch (e) {
+      // a getter that throws: Gecko reports it
+    }
     if (!publicKey) {
       return native();
     }
     let request;
     try {
-      request = kind == "get" ? this.readGet(win, options) : this.readCreate(win, options);
+      request = kind == "get" ? this.readGet(win, page) : this.readCreate(win, page);
     } catch (e) {
       // Something we don't understand: Gecko checks it and says what's wrong.
-      this.sendAsyncMessage("Passkey:Error", { message: `reading the ${kind} request: ${e}` });
+      this.sendAsyncMessage("Passkey:Error", { message: `reading the ${kind} request: ${e}`, show: true });
       return native();
     }
     let signal = options.signal;
+    if (signal != null && !win.AbortSignal.isInstance(signal)) {
+      signal = null;
+    }
     return new win.Promise(
       Cu.exportFunction((resolve, reject) => {
         let fail = (name, message) => reject(new win.DOMException(message, name));
@@ -125,7 +136,7 @@ export class BitwardenPasskeysChild extends JSWindowActorChild {
     let pk = options.publicKey;
     return {
       ...this.frameInfo(),
-      mediation: String(options.mediation ?? "optional"),
+      mediation: String(options.mediation ?? "optional").toLowerCase(),
       rpId: pk.rpId != null ? String(pk.rpId) : null,
       challenge: b64(pk.challenge),
       allowCredentials: listOf(pk.allowCredentials).map(c => b64(c.id)),

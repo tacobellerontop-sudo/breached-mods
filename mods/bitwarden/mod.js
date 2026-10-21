@@ -4,6 +4,8 @@
  *                    password the first time). With several logins they
  *                    show as rows above the command bar: type to narrow,
  *                    Up/Down or Tab to move, Enter to fill.
+ *                    A page with a login form shows the rows by itself
+ *                    (unless the setting says only with :bw.exe).
  *   :bw.exe totp     copy this page's two-step code
  *   :bw.exe sync     fetch the latest vault
  *   :bw.exe lock     forget the unlock key
@@ -13,7 +15,7 @@
  * Passkeys: when a site asks to sign in with a passkey, the ones Bitwarden
  * has for it show as rows (or one is used straight away, if the setting
  * says so). A site that offers passkeys in its login box without asking
- * gets one from :bw.exe. New passkeys can be kept in Bitwarden too. The
+ * shows them with its logins. New passkeys can be kept in Bitwarden too. The
  * signing happens here (PasskeyCrypto.sys.mjs); bw.exe only stores them.
  *
  * The unlock key is kept in memory only, and the master password is passed
@@ -97,7 +99,7 @@ const Bitwarden = {
   },
 
   /** Makes sure the vault is unlocked, asking for the master password. */
-  async unlock() {
+  async unlock(label = "bitwarden master password:") {
     let status = await this.status();
     if (status == "unauthenticated") {
       throw new Error("not logged in: run :bw.exe login (or bw login in a terminal)");
@@ -105,7 +107,7 @@ const Bitwarden = {
     if (status == "unlocked" && this.session) {
       return;
     }
-    let password = await Breached.prompt("bitwarden master password:", { password: true });
+    let password = await Breached.prompt(label, { password: true });
     if (!password) {
       throw new Error("cancelled");
     }
@@ -151,8 +153,8 @@ const Bitwarden = {
     Breached.showMessage("Logged in to Bitwarden");
   },
 
-  currentURL() {
-    let url = Breached.selectedBrowser?.currentURI?.spec;
+  currentURL(browser = Breached.selectedBrowser) {
+    let url = browser?.currentURI?.spec;
     if (!url || !/^https?:/.test(url)) {
       throw new Error("open a website first");
     }
@@ -164,15 +166,22 @@ const Bitwarden = {
     return items.filter(i => i.type == 1 && i.login);
   },
 
-  /** Fills a login into the page's frames from the same site. */
-  async fill(item) {
-    let browser = Breached.selectedBrowser;
+  /** Fills a login into the page's frames from the same site (or the login's own sites). */
+  async fill(item, browser = Breached.selectedBrowser) {
     let top = browser.browsingContext;
-    let site = siteOf(top.currentWindowGlobal?.documentPrincipal);
+    let sites = new Set([siteOf(top.currentWindowGlobal?.documentPrincipal)]);
+    for (let { uri } of item.login.uris ?? []) {
+      try {
+        sites.add(siteOf(Services.scriptSecurityManager.createContentPrincipal(Services.io.newURI(uri), {})));
+      } catch (e) {
+        // not a web address
+      }
+    }
+    sites.delete(null);
     let filled = false;
     for (let bc of top.getAllBrowsingContextsInSubtree()) {
       let wg = bc.currentWindowGlobal;
-      if (!wg || !site || siteOf(wg.documentPrincipal) != site) {
+      if (!wg || !sites.has(siteOf(wg.documentPrincipal))) {
         continue;
       }
       try {
@@ -229,24 +238,40 @@ const Bitwarden = {
         return;
       }
     }
-    let url = this.currentURL();
     if (sub) {
       throw new Error(`unknown: ${sub} (try fill, lock, sync, totp, login, status)`);
     }
-    await this.unlock();
+    await this.choose(Breached.selectedBrowser, false);
+  },
+
+  /**
+   * Shows this page's logins (and passkeys, if the page's login box is
+   * waiting for one) as rows and fills the picked one. auto: the page asked
+   * by showing a login form, not :bw.exe.
+   */
+  async choose(browser, auto, state = {}) {
+    let url = this.currentURL(browser);
+    await this.unlock(auto ? "bitwarden master password (Esc to skip):" : undefined);
     let logins = await this.logins(url);
-    // A login box that offers passkeys: Bitwarden's can answer it.
-    let waiting = Passkeys.waitingFor(Breached.selectedBrowser);
+    let waiting = Passkeys.waitingFor(browser);
     let passkeys = waiting ? await Passkeys.matches(waiting.request) : [];
     this.touch();
+    if (Breached.selectedBrowser !== browser) {
+      return;
+    }
     if (!logins.length && !passkeys.length) {
-      Breached.showMessage("No Bitwarden logins for this site", "error");
+      if (!auto) {
+        Breached.showMessage("No Bitwarden logins for this site", "error");
+      }
       return;
     }
-    if (logins.length == 1 && !passkeys.length) {
-      await this.fill(logins[0]);
+    if (!auto && logins.length == 1 && !passkeys.length) {
+      await this.fill(logins[0], browser);
       return;
     }
+    state.picking = true;
+    state.passkeys = !!waiting;
+    let page = browser.browsingContext.currentWindowGlobal;
     let picked = await Breached.pick("bitwarden:", [
       ...passkeys.map(passkey => ({
         label: Passkeys.userOf(passkey),
@@ -259,15 +284,47 @@ const Bitwarden = {
         login,
       })),
     ]);
-    // The page may have changed while the list was open.
-    if (!picked || Breached.selectedBrowser?.currentURI?.spec != url) {
+    // Another page may be showing by now (the same page changing its
+    // address, as many sign-in pages do, is fine).
+    if (!picked || Breached.selectedBrowser !== browser || browser.browsingContext.currentWindowGlobal !== page) {
       return;
     }
     if (picked.passkey) {
-      await Passkeys.answerWaiting(waiting, picked.passkey);
+      await Passkeys.answerWaiting(Passkeys.waitingFor(browser) ?? waiting, picked.passkey);
     } else {
-      await this.fill(picked.login);
+      await this.fill(picked.login, browser);
     }
+  },
+
+  // browser -> { page, picking, passkeys }: the login rows shown by
+  // themselves for its page, so each page gets them once.
+  offered: new WeakMap(),
+
+  /** A page shows a login form ("form") or its login box waits for a passkey ("passkey"). */
+  offer(browser, why) {
+    if (Mod.pref("breached.mods.bitwarden.popup", "login") == "off" || browser !== Breached.selectedBrowser) {
+      return;
+    }
+    let page = browser.browsingContext?.currentWindowGlobal?.innerWindowId;
+    let last = this.offered.get(browser);
+    if (last?.page == page) {
+      // Shown already; once more only to add a passkey to rows still open.
+      if (!(why == "passkey" && last.open && last.picking && !last.passkeys)) {
+        return;
+      }
+    } else if (!document.getElementById("commandbar").hidden) {
+      return; // something else is being typed or asked
+    }
+    let state = { page, open: true };
+    this.offered.set(browser, state);
+    this.choose(browser, true, state)
+      .catch(e => {
+        if (e.message != "cancelled") {
+          console.error("Bitwarden", e);
+          Breached.showMessage(`bw.exe: ${e.message}`, "error");
+        }
+      })
+      .finally(() => (state.open = false));
   },
 };
 
@@ -295,7 +352,7 @@ const Passkeys = {
     let found = [];
     for (let item of items) {
       for (let passkey of item.login?.fido2Credentials ?? []) {
-        if (passkey.rpId != request.rpId) {
+        if (String(passkey.rpId).toLowerCase() != request.rpId) {
           continue;
         }
         let id = PasskeyCrypto.toB64url(PasskeyCrypto.credentialIdBytes(passkey.credentialId));
@@ -310,12 +367,15 @@ const Passkeys = {
 
   /** Checks the request's site; fills in the rpId. False: leave it to Gecko. */
   prepare(request, rpId) {
-    request.rpId = rpId ?? request.host;
+    request.rpId = String(rpId ?? request.host).toLowerCase();
     let ok = this.mode() != "off" && PasskeyCrypto.rpIdAllowed(request.origin, request.rpId);
     if (!ok) {
       Services.console.logStringMessage(
         `Breached passkeys: leaving ${request.rpId} to Windows (setting ${this.mode()}, page ${request.origin})`
       );
+      if (this.mode() != "off") {
+        Breached.showMessage(`Bitwarden can't answer ${request.rpId}'s passkey request from ${request.origin}`, "error");
+      }
     }
     return ok;
   },
@@ -340,7 +400,10 @@ const Passkeys = {
           return this.sign(request, found[0]);
         }
       }
-      return new Promise(resolve => this.waiting.set(actor, { request, resolve, browser }));
+      let answer = new Promise(resolve => this.waiting.set(actor, { request, resolve, browser }));
+      // The page's login box offers passkeys: show them (with the logins).
+      Bitwarden.offer(browser, "passkey");
+      return answer;
     }
     if (!Bitwarden.session) {
       let answer = await this.useBitwarden(
@@ -360,8 +423,12 @@ const Passkeys = {
     let found = await this.matches(request);
     Bitwarden.touch();
     if (!found.length) {
-      Breached.showMessage(`Bitwarden has no passkey for ${request.rpId}`);
-      return null;
+      // Say so rather than quietly handing it to Windows.
+      let picked = await Breached.pickForTab(browser, `Bitwarden has no passkey for ${request.rpId}:`, [
+        { label: "cancel", detail: "don't sign in with a passkey", answer: "cancel" },
+        { label: "other", detail: "Windows Hello or a security key", answer: "native" },
+      ]);
+      return picked?.answer == "native" ? null : { error: "NotAllowedError" };
     }
     let choice = found[0];
     if (this.mode() != "auto" || found.length > 1) {
@@ -421,6 +488,10 @@ const Passkeys = {
   },
 
   async answerWaiting(waiting, found) {
+    if (!this.waiting.has(waiting.actor)) {
+      Breached.showMessage("The page stopped waiting for a passkey", "error");
+      return;
+    }
     this.waiting.delete(waiting.actor);
     waiting.resolve(await this.sign(waiting.request, found));
   },
@@ -514,6 +585,8 @@ const Passkeys = {
 };
 const { setHandler } = ChromeUtils.importESModule(Mod.url + "PasskeysParent.sys.mjs");
 setHandler(window, Passkeys);
+const LoginForms = ChromeUtils.importESModule(Mod.url + "BitwardenParent.sys.mjs");
+LoginForms.setHandler(window, Bitwarden);
 
 Mod.actor("BitwardenPasskeys", {
   parent: "PasskeysParent.sys.mjs",
@@ -536,6 +609,9 @@ function siteOf(principal) {
 const ACTOR = Mod.actor("Bitwarden", {
   parent: "BitwardenParent.sys.mjs",
   child: "BitwardenChild.sys.mjs",
+  // Pages with a login form show the vault's logins by themselves.
+  events: { DOMContentLoaded: {}, pageshow: {}, focusin: {} },
+  matches: ["http://*/*", "https://*/*"],
 });
 
 Mod.command("bw.exe", {
@@ -556,4 +632,5 @@ Mod.onUnload(() => {
     Passkeys.forget(actor);
   }
   setHandler(window, null);
+  LoginForms.setHandler(window, null);
 });
