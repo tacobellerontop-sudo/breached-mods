@@ -1,7 +1,7 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, finds secure notes, cards and identities (:bw.exe find, :bw.exe notes), makes new passwords and usernames (:bw.exe generate, :bw.exe username) and saves new logins (:bw.exe new), unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.15",

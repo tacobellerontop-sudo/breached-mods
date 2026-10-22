@@ -1,6 +1,7 @@
 /* Bitwarden mod: logins from your vault through the Bitwarden CLI.
  *
- *   Ctrl+Shift+L     (or :bw.exe) click into a login box first. The site's
+ *   :bw.exe          a menu: this site's logins and everything below
+ *   Ctrl+Shift+L     (or :bw.exe logins) click into a login box first. The site's
  *                    logins show as rows above the command bar: type to
  *                    narrow, Up/Down to move, Enter to pick. Then pick what
  *                    to do: paste the username or password into the box
@@ -345,11 +346,57 @@ const Bitwarden = {
       case "add":
         await this.newLogin();
         return;
+      case "logins":
+        await this.choose(Breached.selectedBrowser);
+        return;
     }
     if (sub) {
-      throw new Error(`unknown: ${sub} (try find, notes, generate, username, new, totp, sync, lock, login, pin, status)`);
+      throw new Error(`unknown: ${sub} (try logins, find, notes, generate, username, new, totp, sync, lock, login, pin, status)`);
     }
-    await this.choose(Breached.selectedBrowser);
+    await this.menu();
+  },
+
+  /** :bw.exe on its own: this site's logins (when unlocked) and everything else the mod does. */
+  async menu() {
+    let browser = Breached.selectedBrowser;
+    let url = browser?.currentURI?.spec ?? "";
+    let onSite = /^https?:/.test(url);
+    let rows = [];
+    if (onSite) {
+      let logins = this.session && this.items && !Engine.waiting(browser) ? this.matching(this.items, url) : null;
+      if (logins) {
+        rows.push(...logins.map(item => ({ label: item.login.username || "(no username)", detail: `login: ${item.name}`, item })));
+      } else {
+        rows.push({ label: "this site's logins", detail: "unlock and list them (Ctrl+Shift+L)", run: "logins" });
+      }
+    }
+    rows.push({ label: "find in vault", detail: "logins, secure notes, cards and identities", run: "find" });
+    rows.push({ label: "secure notes", detail: "copy a note or one of its lines", run: "notes" });
+    rows.push({ label: "new password", detail: `${generatorLength()} characters, to paste or copy`, run: "generate" });
+    rows.push({ label: "new passphrase", detail: "four words", run: "generate words" });
+    rows.push({ label: "new username", detail: "a random username", run: "username" });
+    if (onSite) {
+      rows.push({ label: "save a login for this site", detail: "a username and a new password, kept in Bitwarden", run: "new" });
+      rows.push({ label: "two-step code", detail: "copy this site's current code", run: "totp" });
+    }
+    rows.push({ label: "sync", detail: "fetch the latest vault", run: "sync" });
+    rows.push({ label: "lock", detail: Pin.has() ? "the PIN unlocks it again" : "lock the vault", run: "lock" });
+    rows.push({ label: "lock all", detail: "only the master password unlocks it next time", run: "lock all" });
+    rows.push({ label: "PIN", detail: "set or change the PIN", run: "pin" });
+    rows.push({ label: "status", detail: "locked, unlocked or logged out", run: "status" });
+    rows.push({ label: "log in", detail: "log in to your Bitwarden account", run: "login" });
+    let picked = await Breached.pick("bitwarden:", rows);
+    if (!picked) {
+      return;
+    }
+    if (picked.item) {
+      if (Breached.selectedBrowser === browser) {
+        this.touch();
+        await this.loginActions(browser, picked.item);
+      }
+      return;
+    }
+    await this.run(picked.run);
   },
 
   /**
@@ -395,6 +442,12 @@ const Bitwarden = {
       Breached.showMessage(`Signing in to ${picked.passkey.rpId} as ${picked.passkey.name}`);
       return;
     }
+    await this.loginActions(browser, picked.login);
+  },
+
+  /** What to do with a picked login: paste or copy its parts. */
+  async loginActions(browser, item) {
+    let picked = { login: item };
     let { login } = picked.login;
     let who = login.username || picked.login.name;
     let actions = [];
@@ -1236,7 +1289,7 @@ function readClipboard() {
 
 Mod.command("bw.exe", {
   usage:
-    "bw.exe [find|notes|generate|username|new|totp|sync|lock|login|pin|status]  (paste or copy this site's login from Bitwarden; Ctrl+Shift+L)",
+    "bw.exe [logins|find|notes|generate|username|new|totp|sync|lock|login|pin|status]  (Bitwarden: a menu of all of it; Ctrl+Shift+L for this site's logins)",
   run(args) {
     Bitwarden.run(args).catch(e => {
       if (e.message != "cancelled") {
@@ -1247,7 +1300,7 @@ Mod.command("bw.exe", {
   },
 });
 Mod.command("bw", { alias: "bw.exe" });
-Mod.key("l", "accel,shift", () => Breached.run("bw.exe"));
+Mod.key("l", "accel,shift", () => Breached.run("bw.exe logins"));
 Mod.onUnload(() => {
   Bitwarden.lock();
   delete window.breachedBitwardenPasskeys;
