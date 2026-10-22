@@ -13,6 +13,11 @@
  *   :bw.exe pin      set or change the PIN
  *   :bw.exe status
  *
+ * Autofill: while the vault is unlocked, Gecko's own password manager gets
+ * its logins (Autofill.sys.mjs). It fills in a site's only login when the
+ * page loads and lists the logins when you click a login box. They stay in
+ * memory; nothing is written to Gecko's login store.
+ *
  * The first unlock asks for your master password, then offers a PIN for
  * the next ones (after the vault locks itself when idle, or after a
  * restart if the setting says so).
@@ -38,6 +43,11 @@ const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subpro
 const Bitwarden = {
   session: null,
   _lockTimer: null,
+  // The unlocked vault's items, so Ctrl+Shift+L and autofill don't wait on
+  // bw.exe (a second or more a call). Refreshed in the background.
+  items: null,
+  _itemsAt: 0,
+  _checkedAt: 0,
 
   async exe() {
     let path = Mod.pref("breached.mods.bitwarden.path", "").trim();
@@ -107,6 +117,8 @@ const Bitwarden = {
   lock({ forget = false } = {}) {
     clearTimeout(this._lockTimer);
     this.session = null;
+    this._checkedAt = 0;
+    this.forgetItems();
     if (forget) {
       Pin.forget();
       // Locked for good: sites can't use its passkeys until it's unlocked again.
@@ -118,11 +130,16 @@ const Bitwarden = {
 
   /** Makes sure the vault is unlocked, asking for the PIN or the master password. */
   async unlock() {
+    if (this.session && Date.now() - this._checkedAt < 10 * 60 * 1000) {
+      // Checked lately: no need to ask bw.exe again (that's the slow part).
+      return;
+    }
     let status = await this.status();
     if (status == "unauthenticated") {
       throw new Error("not logged in: run :bw.exe login (or bw login in a terminal)");
     }
     if (status == "unlocked" && this.session) {
+      this._checkedAt = Date.now();
       if (!Engine.loaded) {
         await Passkeys.load().catch(e => console.error("Bitwarden: loading passkeys", e));
       }
@@ -133,6 +150,7 @@ const Bitwarden = {
       if (session) {
         this.session = session;
         if ((await this.status()) == "unlocked") {
+          this._checkedAt = Date.now();
           this.touch();
           await Passkeys.load().catch(e => console.error("Bitwarden: loading passkeys", e));
           return;
@@ -157,6 +175,7 @@ const Bitwarden = {
       throw new Error(r.stderr || "couldn't unlock");
     }
     this.session = r.stdout;
+    this._checkedAt = Date.now();
     this.touch();
     await Passkeys.load().catch(e => console.error("Bitwarden: loading passkeys", e));
     if (!Pin.has() && Mod.pref("breached.mods.bitwarden.pin", "ask") != "off") {
@@ -202,9 +221,53 @@ const Bitwarden = {
     return url;
   },
 
+  /** The vault's items, from memory when they're recent. */
+  async vault({ fresh = false } = {}) {
+    let age = Date.now() - this._itemsAt;
+    if (this.items && !fresh && age < 10 * 60 * 1000) {
+      if (age > 60 * 1000) {
+        this.refresh();
+      }
+      return this.items;
+    }
+    this.items = await this.json(["list", "items"]);
+    this._itemsAt = Date.now();
+    return this.items;
+  },
+
+  refresh() {
+    if (this._refreshing || !this.session) {
+      return;
+    }
+    this._refreshing = this.json(["list", "items"])
+      .then(items => {
+        if (this.session) {
+          this.items = items;
+          this._itemsAt = Date.now();
+        }
+      })
+      .catch(e => console.error("Bitwarden: refreshing the vault", e))
+      .finally(() => (this._refreshing = null));
+  },
+
+  forgetItems() {
+    this.items = null;
+    this._itemsAt = 0;
+  },
+
   async logins(url) {
-    let items = await this.json(["list", "items", "--url", url]);
-    return items.filter(i => i.type == 1 && i.login);
+    return this.matching(await this.vault(), url);
+  },
+
+  /** The login items whose web addresses match url (Bitwarden's match rules). */
+  matching(items, url) {
+    let page;
+    try {
+      page = new URL(url);
+    } catch (e) {
+      return [];
+    }
+    return items.filter(i => i.type == 1 && i.login && (i.login.uris ?? []).some(u => uriMatches(u, page)));
   },
 
   async run(args) {
@@ -237,6 +300,7 @@ const Bitwarden = {
         await this.unlock();
         Breached.showMessage("Syncing…");
         await this.json(["sync"]).catch(() => null);
+        await this.vault({ fresh: true });
         Breached.showMessage("Bitwarden synced");
         this.touch();
         return;
@@ -525,11 +589,13 @@ const Passkeys = {
   /** Loads the vault's passkeys into Breached (the vault is unlocked). */
   async load() {
     if (!Engine.running) {
+      // (The logins still go into memory, for Ctrl+Shift+L and autofill.)
+      await Bitwarden.vault({ fresh: true });
       return;
     }
     // New ones made while locked go into the vault first, then load with the rest.
     await this.saveUnsaved();
-    let items = await Bitwarden.json(["list", "items"]);
+    let items = await Bitwarden.vault({ fresh: true });
     let list = [];
     for (let item of items) {
       for (let passkey of item.login?.fido2Credentials ?? []) {
@@ -663,7 +729,9 @@ const Passkeys = {
   async saveItem(item) {
     let encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(item))));
     let args = item.id ? ["edit", "item", item.id, encoded] : ["create", "item", encoded];
-    return Bitwarden.json(args);
+    let saved = await Bitwarden.json(args);
+    Bitwarden.refresh();
+    return saved;
   },
 };
 // Each window runs this mod; Breached has one passkey provider. A popup
@@ -697,6 +765,114 @@ for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
   }
 }
 
+/** The site part Bitwarden's default "base domain" matching compares. */
+function baseDomain(host) {
+  try {
+    return Services.eTLD.getBaseDomainFromHost(host);
+  } catch (e) {
+    return host; // an IP address or localhost
+  }
+}
+
+/** Whether one of a login's web addresses matches the page (Bitwarden's match detection). */
+function uriMatches({ uri, match }, page) {
+  if (!uri) {
+    return false;
+  }
+  let saved;
+  try {
+    saved = new URL(/^[a-z][a-z0-9+.-]*:/i.test(uri) ? uri : "https://" + uri);
+  } catch (e) {
+    return false;
+  }
+  switch (match ?? 0) {
+    case 0: // base domain
+      return /^https?:$/.test(saved.protocol) && baseDomain(saved.hostname) == baseDomain(page.hostname);
+    case 1: // host (with port)
+      return saved.host == page.host;
+    case 2: // starts with
+      return page.href.startsWith(uri);
+    case 3: // exact
+      return page.href == uri;
+    case 4: // regular expression
+      try {
+        return new RegExp(uri, "i").test(page.href);
+      } catch (e) {
+        return false;
+      }
+    default: // 5: never
+      return false;
+  }
+}
+
+// ---------------------------------------------------------------- autofill
+
+const Autofill = ChromeUtils.importESModule(Mod.url + "Autofill.sys.mjs" + V);
+const AUTOFILL_PREF = "breached.mods.bitwarden.autofill";
+
+/** Gecko's password manager asks this for a site's logins (see Autofill.sys.mjs). */
+const Logins = {
+  /** The unlocked vault's logins for a page's origin; none while locked. */
+  loginsFor(origin) {
+    if (!Bitwarden.session || !Bitwarden.items) {
+      return [];
+    }
+    Bitwarden.touch();
+    return Bitwarden.matching(Bitwarden.items, origin + "/").map(i => ({
+      id: i.id,
+      username: i.login.username ?? "",
+      password: i.login.password ?? "",
+    }));
+  },
+
+  loginById(id, origin) {
+    let item = Bitwarden.session && Bitwarden.items?.find(i => i.id == id && i.type == 1);
+    if (!item || (origin && !Bitwarden.matching([item], origin + "/").length)) {
+      return null;
+    }
+    return { id, origin, username: item.login.username ?? "", password: item.login.password ?? "" };
+  },
+};
+window.breachedBitwardenLogins = Logins;
+
+/** Gecko's login prefs, unless the Passwords mod (Gecko's own saved passwords) sets them. */
+function autofillPrefs(mode) {
+  if (ModHost.loaded.has("passwords")) {
+    return;
+  }
+  if (mode == "off") {
+    Services.prefs.setBoolPref("signon.rememberSignons", false);
+    Services.prefs.clearUserPref("signon.storeSignons");
+    return;
+  }
+  Services.prefs.setBoolPref("signon.rememberSignons", true);
+  // Fill and suggest, but never save passwords in Gecko's own store.
+  Services.prefs.setBoolPref("signon.storeSignons", false);
+  Services.prefs.setBoolPref("signon.autofillForms", mode == "fill");
+}
+
+const autofillSetting = () => {
+  let mode = Mod.pref(AUTOFILL_PREF, "fill");
+  let ours = Autofill.provider() === Logins;
+  if (mode == "off") {
+    if (ours) {
+      Autofill.stop();
+      autofillPrefs("off");
+    }
+    return;
+  }
+  if (Breached.isPopup || (Autofill.provider() && !ours)) {
+    if (ours) {
+      autofillPrefs(mode);
+    }
+    return;
+  }
+  Autofill.start(Logins);
+  autofillPrefs(mode);
+};
+autofillSetting();
+Services.prefs.addObserver(AUTOFILL_PREF, autofillSetting);
+
 /** The clipboard's text, or null. */
 function readClipboard() {
   try {
@@ -728,6 +904,17 @@ Mod.key("l", "accel,shift", () => Breached.run("bw.exe"));
 Mod.onUnload(() => {
   Bitwarden.lock();
   delete window.breachedBitwardenPasskeys;
+  delete window.breachedBitwardenLogins;
+  Services.prefs.removeObserver(AUTOFILL_PREF, autofillSetting);
+  if (Autofill.provider() === Logins) {
+    let other = [...Services.wm.getEnumerator("breached:main")].find(w => w != window && !w.closed && w.breachedBitwardenLogins);
+    if (other && ModHost.loaded.has("bitwarden")) {
+      Autofill.handOver(other.breachedBitwardenLogins);
+    } else {
+      Autofill.stop();
+      autofillPrefs("off");
+    }
+  }
   Services.prefs.removeObserver(PASSKEYS_PREF, passkeysSetting);
   if (Engine.provider === Passkeys) {
     // Hand the passkeys to another window running the mod, else back to Windows.

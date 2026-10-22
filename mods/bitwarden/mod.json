@@ -1,8 +1,8 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.7.0",
-  "description": "Paste or copy logins from your Bitwarden vault into any login box (Ctrl+Shift+L or :bw.exe), unlock with a PIN, and sign in with passkeys kept there: Breached answers passkey requests itself instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
+  "version": "1.8.0",
+  "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.15",
   "commands": [
@@ -40,6 +40,26 @@
         [
           "off",
           "No PIN"
+        ]
+      ]
+    },
+    {
+      "pref": "breached.mods.bitwarden.autofill",
+      "label": "Filling login forms",
+      "hint": "While the vault is unlocked, Breached's password manager uses its logins: a site's only login is filled in when the page loads, and clicking a login box lists them. Nothing is saved outside Bitwarden.",
+      "type": "choice",
+      "options": [
+        [
+          "fill",
+          "Fill in a site's only login, and list logins in login boxes"
+        ],
+        [
+          "suggest",
+          "Only list logins when I click a login box"
+        ],
+        [
+          "off",
+          "Don't fill (Ctrl+Shift+L still works)"
         ]
       ]
     },
