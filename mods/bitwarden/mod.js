@@ -6,6 +6,15 @@
  *                    to do: paste the username or password into the box
  *                    you were in, or copy it.
  *   :bw.exe totp     copy this page's two-step code
+ *   :bw.exe find     search the whole vault (logins, secure notes, cards,
+ *                    identities); pick one, then a field to paste or copy
+ *   :bw.exe notes    the secure notes: each line is a row to copy
+ *   :bw.exe generate a new password (generate 32 for its length, generate
+ *                    words for a passphrase): paste, copy or another one
+ *   :bw.exe username a new username (a random word, or an address made
+ *                    from your email address or domain in settings)
+ *   :bw.exe new      save a login for this site: a username and a new
+ *                    password, kept in the vault and pasted into the page
  *   :bw.exe sync     fetch the latest vault
  *   :bw.exe lock     lock (the PIN unlocks it again)
  *   :bw.exe lock all lock so that only the master password unlocks it
@@ -316,9 +325,29 @@ const Bitwarden = {
         this.touch();
         return;
       }
+      case "find":
+      case "search":
+        await this.find(rest.join(" "));
+        return;
+      case "notes":
+      case "note":
+        await this.find(rest.join(" "), { type: 2 });
+        return;
+      case "generate":
+      case "gen":
+        await this.offerPassword(rest);
+        return;
+      case "username":
+      case "user":
+        await this.offerUsername();
+        return;
+      case "new":
+      case "add":
+        await this.newLogin();
+        return;
     }
     if (sub) {
-      throw new Error(`unknown: ${sub} (try lock, sync, totp, login, pin, status)`);
+      throw new Error(`unknown: ${sub} (try find, notes, generate, username, new, totp, sync, lock, login, pin, status)`);
     }
     await this.choose(Breached.selectedBrowser);
   },
@@ -391,7 +420,15 @@ const Bitwarden = {
     if (login.totp) {
       actions.push({ label: "copy two-step code", detail: "the current code", copy: "totp" });
     }
+    // Its notes and custom fields too.
+    let extra = fieldsOf(picked.login).filter(f => !["username", "password"].includes(f.name));
+    actions.push(...extra.map(field => ({ label: `copy ${field.name}`, detail: field.shown, field })));
     let action = await Breached.pick(`${who}:`, actions);
+    if (action?.field) {
+      this.copy(action.field.value, action.field.secret);
+      Breached.showMessage(`Copied the ${action.field.name} of ${who}`);
+      return;
+    }
     if (!action || Breached.selectedBrowser !== browser) {
       return;
     }
@@ -409,6 +446,211 @@ const Bitwarden = {
     } else {
       this.copy(text, what != "username");
       Breached.showMessage(`Copied the ${name} of ${who}`);
+    }
+  },
+
+  /** :bw.exe find / notes: the vault's items (of one type), then a field of the picked one. */
+  async find(text, { type = null } = {}) {
+    await this.unlock();
+    let items = (await this.vault()).filter(i => (type == null || i.type == type) && KINDS[i.type]);
+    this.touch();
+    if (!items.length) {
+      Breached.showMessage(type == 2 ? "No secure notes in your vault" : "Your vault is empty", "error");
+      return;
+    }
+    let browser = Breached.selectedBrowser;
+    let rows = items
+      .map(item => ({ label: item.name || "(no name)", detail: summary(item), item }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    let words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    rows = rows.filter(r => words.every(w => `${r.label} ${r.detail}`.toLowerCase().includes(w)));
+    let picked = rows.length == 1 && words.length ? rows[0] : await Breached.pick(type == 2 ? "secure notes:" : "bitwarden:", rows);
+    if (!picked) {
+      return;
+    }
+    let item = picked.item;
+    let fields = fieldsOf(item);
+    if (!fields.length) {
+      Breached.showMessage(`${item.name} has nothing to copy`, "error");
+      return;
+    }
+    let canPaste = /^https?:/.test(browser?.currentURI?.spec ?? "");
+    let actions = [];
+    for (let field of fields) {
+      if (field.name == "note") {
+        // A note: the whole of it, then each line, so one line can be copied.
+        actions.push({ label: "copy the whole note", detail: field.shown, field });
+        let lines = field.value.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length > 1) {
+          actions.push(...lines.map(line => ({ label: line.trim(), detail: "copy this line", field: { ...field, value: line.trim() } })));
+        }
+        continue;
+      }
+      actions.push({ label: `copy ${field.name}`, detail: field.shown, field });
+      if (canPaste && field.name != "note") {
+        actions.push({ label: `paste ${field.name}`, detail: "into the box you were in", field, paste: true });
+      }
+    }
+    let action = await Breached.pick(`${item.name}:`, actions);
+    if (!action) {
+      return;
+    }
+    let { field } = action;
+    let value = field.name == "two-step code" ? await this.totp(item) : field.value;
+    if (action.paste) {
+      if (Breached.selectedBrowser !== browser) {
+        return;
+      }
+      await this.paste(browser, [value]);
+      Breached.showMessage(`Pasted the ${field.name} of ${item.name}`);
+    } else {
+      this.copy(value, field.secret);
+      Breached.showMessage(`Copied ${action.label.startsWith("copy") ? "the " + field.name : "the line"} of ${item.name}`);
+    }
+  },
+
+  /** A new password (or passphrase), Bitwarden's generator. */
+  async generate({ length, words, symbols = true } = {}) {
+    if (words) {
+      let r = await this.bw(["generate", "--passphrase", "--words", String(words), "--separator", "-", "--capitalize", "--includeNumber"]);
+      if (r.code != 0 || !r.stdout) {
+        throw new Error(r.stderr || "couldn't make a passphrase");
+      }
+      return r.stdout;
+    }
+    return randomPassword(length || generatorLength(), symbols);
+  },
+
+  /** :bw.exe generate [length] [words [count]] [simple] */
+  async offerPassword(args) {
+    let options = {};
+    for (let i = 0; i < args.length; i++) {
+      let arg = args[i].toLowerCase();
+      if (/^\d+$/.test(arg)) {
+        options.length = Math.min(128, Math.max(5, parseInt(arg, 10)));
+      } else if (arg == "words" || arg == "passphrase") {
+        options.words = /^\d+$/.test(args[i + 1] ?? "") ? Math.min(20, Math.max(3, parseInt(args[++i], 10))) : 4;
+      } else if (arg == "simple" || arg == "nosymbols") {
+        options.symbols = false;
+      } else {
+        throw new Error(`generate takes a length, "words" or "simple", not ${arg}`);
+      }
+    }
+    await this.offer("password", () => this.generate(options));
+  },
+
+  /** :bw.exe username */
+  async offerUsername() {
+    await this.offer("username", () => this.username());
+  },
+
+  /** Shows a new value with paste, copy and another one. */
+  async offer(name, make) {
+    let browser = Breached.selectedBrowser;
+    let canPaste = /^https?:/.test(browser?.currentURI?.spec ?? "");
+    let secret = name == "password";
+    for (;;) {
+      let value = await make();
+      let rows = [];
+      if (canPaste) {
+        rows.push({ label: value, detail: `paste this ${name} into the box you were in`, act: "paste" });
+      }
+      rows.push(
+        { label: canPaste ? `copy` : value, detail: `copy this ${name}${secret ? " (cleared after 30 seconds)" : ""}`, act: "copy" },
+        { label: "another one", detail: `make a different ${name}`, act: "again" }
+      );
+      let picked = await Breached.pick(`new ${name}:`, rows);
+      if (!picked) {
+        return null;
+      }
+      if (picked.act == "again") {
+        continue;
+      }
+      if (picked.act == "paste") {
+        if (Breached.selectedBrowser !== browser) {
+          return null;
+        }
+        await this.paste(browser, [value]);
+        Breached.showMessage(`Pasted the new ${name}`);
+      } else {
+        this.copy(value, secret);
+        Breached.showMessage(`Copied the new ${name}`);
+      }
+      return value;
+    }
+  },
+
+  /** A random username: a word and digits, or an address from the email setting. */
+  async username() {
+    let r = await this.bw(["generate", "--passphrase", "--words", "1", "--separator", ""]);
+    let word = r.code == 0 && /^[a-z]+$/i.test(r.stdout) ? r.stdout.toLowerCase() : randomPassword(8, false).toLowerCase().replace(/[^a-z]/g, "") || "user";
+    let digits = String(randomInt(10000)).padStart(4, "0");
+    let email = Mod.pref("breached.mods.bitwarden.usernameEmail", "").trim();
+    if (/^[^@\s]+@[^@\s]+$/.test(email)) {
+      // Plus addressing: mail still reaches you, and shows which site it came from.
+      let [user, domain] = email.split("@");
+      return `${user}+${word}${digits}@${domain}`;
+    }
+    let domain = Mod.pref("breached.mods.bitwarden.usernameDomain", "").trim().replace(/^@/, "");
+    if (/^[^@\s]+\.[^@\s]+$/.test(domain)) {
+      return `${word}${digits}@${domain}`;
+    }
+    return word + digits;
+  },
+
+  /** :bw.exe new: a login for this site, with a new password, kept in the vault and pasted. */
+  async newLogin() {
+    let browser = Breached.selectedBrowser;
+    let url = new URL(this.currentURL(browser));
+    await this.unlock();
+    let suggestions = [];
+    for (let i = 0; i < 3; i++) {
+      suggestions.push(await this.username());
+    }
+    let pickedName = await Breached.pick(`username for ${url.hostname}:`, [
+      { label: "type my own", detail: "type the username or email address", own: true },
+      ...[...new Set(suggestions)].map(name => ({ label: name, detail: "a new username", name })),
+    ]);
+    if (!pickedName) {
+      return;
+    }
+    let username = pickedName.own ? await Breached.prompt(`username for ${url.hostname}:`) : pickedName.name;
+    if (!username) {
+      return;
+    }
+    let password = await this.generate();
+    let item = {
+      type: 1,
+      name: url.hostname,
+      notes: null,
+      favorite: false,
+      fields: [],
+      login: { uris: [{ match: null, uri: url.origin }], username: username.trim(), password, totp: null },
+      secureNote: null,
+      card: null,
+      identity: null,
+      reprompt: 0,
+    };
+    Breached.showMessage("Saving…");
+    let saved = await Passkeys.saveItem(item);
+    this.items = [...(this.items ?? []).filter(i => i.id != saved.id), saved];
+    this.touch();
+    Breached.showMessage(`Saved ${username} for ${url.hostname} in Bitwarden`);
+    let action = await Breached.pick(`${username}:`, [
+      { label: "paste both", detail: "username, Tab, password", parts: [username.trim(), "\t", password] },
+      { label: "paste password", detail: "into the box you were in", parts: [password] },
+      { label: "paste username", detail: username, parts: [username.trim()] },
+      { label: "copy password", detail: "cleared from the clipboard after 30 seconds", copy: password },
+    ]);
+    if (!action || Breached.selectedBrowser !== browser) {
+      return;
+    }
+    if (action.copy) {
+      this.copy(action.copy, true);
+      Breached.showMessage("Copied the new password");
+    } else {
+      await this.paste(browser, action.parts);
+      Breached.showMessage(`Pasted the ${action.label.replace("paste ", "")}`);
     }
   },
 
@@ -765,6 +1007,110 @@ for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
   }
 }
 
+// ---------------------------------------------------------------- vault items
+
+const KINDS = { 1: "login", 2: "secure note", 3: "card", 4: "identity" };
+
+/** The detail shown beside an item's name. */
+function summary(item) {
+  let kind = KINDS[item.type];
+  let extra =
+    item.type == 1
+      ? item.login?.username
+      : item.type == 3
+        ? [item.card?.brand, item.card?.number ? "…" + item.card.number.slice(-4) : null].filter(Boolean).join(" ")
+        : item.type == 4
+          ? [item.identity?.firstName, item.identity?.lastName].filter(Boolean).join(" ") || item.identity?.email
+          : item.notes?.split(/\r?\n/)[0];
+  return extra ? `${kind}: ${extra}` : kind;
+}
+
+/** An item's fields that can be copied: { name, value, shown, secret }. */
+function fieldsOf(item) {
+  let fields = [];
+  // secret: hidden in the rows and cleared from the clipboard after 30 seconds.
+  let add = (name, value, secret = true, shown = null) => {
+    if (value != null && String(value).trim() !== "") {
+      value = String(value);
+      shown ??= secret ? "•".repeat(Math.min(value.length, 12)) : value.split(/\r?\n/)[0];
+      fields.push({ name, value, secret, shown });
+    }
+  };
+  let { login, card, identity: id } = item;
+  if (item.type == 1 && login) {
+    add("username", login.username, false);
+    add("password", login.password);
+    if (login.totp) {
+      fields.push({ name: "two-step code", value: "", secret: true, shown: "the current code" });
+    }
+    add("web address", login.uris?.[0]?.uri, false);
+  } else if (item.type == 3 && card) {
+    add("card number", card.number);
+    add("cardholder name", card.cardholderName, false);
+    if (card.expMonth || card.expYear) {
+      add("expiry", `${String(card.expMonth ?? "").padStart(2, "0")}/${card.expYear ?? ""}`, false);
+    }
+    add("security code", card.code);
+  } else if (item.type == 4 && id) {
+    add("name", [id.title, id.firstName, id.middleName, id.lastName].filter(Boolean).join(" "), false);
+    add("email", id.email, false);
+    add("phone", id.phone, false);
+    add("username", id.username, false);
+    add("company", id.company, false);
+    add("address", [id.address1, id.address2, id.address3].filter(Boolean).join(", "), false);
+    add("city", id.city, false);
+    add("state", id.state, false);
+    add("postal code", id.postalCode, false);
+    add("country", id.country, false);
+    add("social security number", id.ssn);
+    add("passport number", id.passportNumber);
+    add("licence number", id.licenseNumber);
+  }
+  // A note's first line shows; the clipboard is still cleared.
+  add("note", item.notes, true, item.notes?.split(/\r?\n/).find(l => l.trim())?.trim());
+  for (let field of item.fields ?? []) {
+    // Custom fields: 0 text, 1 hidden, 2 a tick box, 3 linked (nothing to copy).
+    if (field.type == 3) {
+      continue;
+    }
+    add(field.name || "field", field.type == 2 ? String(field.value == "true") : field.value, field.type == 1);
+  }
+  return fields;
+}
+
+/** A random number below n, without the bias of %. */
+function randomInt(n) {
+  let limit = Math.floor(0x100000000 / n) * n;
+  let value;
+  do {
+    value = crypto.getRandomValues(new Uint32Array(1))[0];
+  } while (value >= limit);
+  return value % n;
+}
+
+/** Like Bitwarden's default: upper and lower case, digits and (unless simple) symbols, one of each. */
+function randomPassword(length, symbols = true) {
+  let sets = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789"];
+  if (symbols) {
+    sets.push("!@#$%^&*");
+  }
+  let all = sets.join("");
+  let chars = sets.map(set => set[randomInt(set.length)]);
+  while (chars.length < length) {
+    chars.push(all[randomInt(all.length)]);
+  }
+  for (let i = chars.length - 1; i > 0; i--) {
+    let j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+function generatorLength() {
+  let length = parseInt(Mod.pref("breached.mods.bitwarden.generateLength", "20"), 10);
+  return Number.isFinite(length) ? Math.min(128, Math.max(5, length)) : 20;
+}
+
 /** The site part Bitwarden's default "base domain" matching compares. */
 function baseDomain(host) {
   try {
@@ -889,7 +1235,8 @@ function readClipboard() {
 }
 
 Mod.command("bw.exe", {
-  usage: "bw.exe [totp|sync|lock|login|pin|status]  (paste or copy this site's login from Bitwarden; Ctrl+Shift+L)",
+  usage:
+    "bw.exe [find|notes|generate|username|new|totp|sync|lock|login|pin|status]  (paste or copy this site's login from Bitwarden; Ctrl+Shift+L)",
   run(args) {
     Bitwarden.run(args).catch(e => {
       if (e.message != "cancelled") {

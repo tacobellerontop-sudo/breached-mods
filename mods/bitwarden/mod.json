@@ -1,8 +1,8 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.8.0",
-  "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
+  "version": "1.9.0",
+  "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, finds secure notes, cards and identities (:bw.exe find, :bw.exe notes), makes new passwords and usernames (:bw.exe generate, :bw.exe username) and saves new logins (:bw.exe new), unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.15",
   "commands": [
@@ -62,6 +62,27 @@
           "Don't fill (Ctrl+Shift+L still works)"
         ]
       ]
+    },
+    {
+      "pref": "breached.mods.bitwarden.generateLength",
+      "label": "Length of new passwords",
+      "hint": "For :bw.exe generate and :bw.exe new (5 to 128). :bw.exe generate 32 makes one of another length; :bw.exe generate words makes a passphrase.",
+      "placeholder": "20",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.usernameEmail",
+      "label": "Your email address, for new usernames",
+      "hint": "When set, :bw.exe username and :bw.exe new suggest you+word1234@your.domain (plus addressing: the mail still reaches you). Leave empty for plain random usernames.",
+      "placeholder": "you@example.com",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.usernameDomain",
+      "label": "Your own domain, for new usernames",
+      "hint": "If you get every address at your domain (catch-all), new usernames are word1234@your.domain. Used when the email address above is empty.",
+      "placeholder": "example.com",
+      "type": "text"
     },
     {
       "pref": "breached.mods.bitwarden.passkeys",
