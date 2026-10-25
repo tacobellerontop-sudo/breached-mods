@@ -52,7 +52,10 @@ export class BitwardenWaitChild extends JSWindowActorChild {
       }
       return new win.Promise(
         Cu.exportFunction((resolve, reject) => {
-          let go = () => {
+          let go = why => {
+            if (why !== true) {
+              console.error("Bitwarden wait: going on without waiting", why);
+            }
             try {
               resolve(call());
             } catch (e) {
@@ -65,10 +68,10 @@ export class BitwardenWaitChild extends JSWindowActorChild {
           try {
             actor = win.windowGlobalChild.getActor("BitwardenWait");
           } catch (e) {
-            go();
+            go(e);
             return;
           }
-          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(go, go);
+          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(() => go(true), go);
         }, win)
       );
     }
