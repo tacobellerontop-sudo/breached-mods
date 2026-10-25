@@ -47,6 +47,7 @@ export class BitwardenWaitChild extends JSWindowActorChild {
       } catch (e) {
         // a getter that throws: Gecko reports it
       }
+      console.error("Bitwarden wait: request", passkey, Services.cpmm.sharedData.get(READY));
       if (!passkey || Services.cpmm.sharedData.get(READY) !== false) {
         return call();
       }
@@ -71,7 +72,10 @@ export class BitwardenWaitChild extends JSWindowActorChild {
             go(e);
             return;
           }
-          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(() => go(true), go);
+          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(answer => {
+            console.error("Bitwarden wait: answered", answer);
+            go(true);
+          }, go);
         }, win)
       );
     }
