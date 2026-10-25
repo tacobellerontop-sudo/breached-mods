@@ -974,25 +974,17 @@ const Passkeys = {
       host = new URL(origin).hostname;
     } catch (e) {}
     Breached.showMessage(`${host || "This site"} asked for a passkey: unlock Bitwarden`);
-    return new Promise(resolve => {
-      // Done as soon as they're in, not after the PIN question that may follow.
-      let timer = setInterval(() => {
-        if (Engine.loaded) {
-          clearInterval(timer);
-          resolve(true);
+    // Gecko refuses passkey requests from a page without focus, so this
+    // answers once the unlock is over (the PIN question included) and the
+    // command bar has handed the focus back to the page.
+    return Bitwarden.unlock()
+      .catch(e => {
+        if (e.message != "cancelled") {
+          Breached.showMessage(`bw.exe: ${e.message}`, "error");
         }
-      }, 200);
-      Bitwarden.unlock()
-        .catch(e => {
-          if (e.message != "cancelled") {
-            Breached.showMessage(`bw.exe: ${e.message}`, "error");
-          }
-        })
-        .finally(() => {
-          clearInterval(timer);
-          resolve(Engine.loaded);
-        });
-    });
+      })
+      .then(() => new Promise(resolve => setTimeout(resolve, 150)))
+      .then(() => Engine.loaded);
   },
 
   /** A site made a passkey in Breached: keep it in the vault. */
