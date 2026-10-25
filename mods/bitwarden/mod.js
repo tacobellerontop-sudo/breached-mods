@@ -966,7 +966,7 @@ const Passkeys = {
    * resolves true once the vault's passkeys are loaded, false if not.
    */
   waitForUnlock(browser, origin) {
-    console.error("Bitwarden wait: parent", Engine.loaded, Engine.running);
+    Services.console.logStringMessage("Bitwarden wait: parent " + [Engine.loaded, Engine.running].join(" "));
     if (Engine.loaded || !Engine.running) {
       return Engine.loaded;
     }
