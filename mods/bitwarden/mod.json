@@ -1,8 +1,8 @@
 {
   "id": "bitwarden",
   "name": "Bitwarden",
-  "version": "1.10.0",
-  "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, finds secure notes, cards and identities (:bw.exe find, :bw.exe notes), makes new passwords and usernames (:bw.exe generate, :bw.exe username) and saves new logins (:bw.exe new), unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
+  "version": "1.11.0",
+  "description": "Fills logins from your Bitwarden vault into login forms (Gecko's own autofill and login dropdown), pastes or copies them with Ctrl+Shift+L or :bw.exe, finds secure notes, cards and identities (:bw.exe find, :bw.exe notes), makes new passwords, usernames and forwarding addresses through DuckDuckGo, Firefox Relay, SimpleLogin, addy.io or Forward Email (:bw.exe generate, :bw.exe username, :bw.exe alias) and saves new logins (:bw.exe new), unlocks with a PIN, and signs in with passkeys kept there instead of Windows. Uses the Bitwarden command-line app (bw.exe).",
   "script": "mod.js",
   "breached": "0.1.15",
   "commands": [
@@ -82,6 +82,45 @@
       "label": "Your own domain, for new usernames",
       "hint": "If you get every address at your domain (catch-all), new usernames are word1234@your.domain. Used when the email address above is empty.",
       "placeholder": "example.com",
+      "type": "text"
+    },
+    {
+      "pref": "breached.mods.bitwarden.forwarder",
+      "label": "Forwarding addresses from",
+      "hint": "For :bw.exe alias and :bw.exe new: a service that makes a new email address forwarding to you, as in Bitwarden's generator. The first use asks for its API key and keeps it in your vault as \"Breached: <service> API key\".",
+      "type": "choice",
+      "options": [
+        [
+          "ask",
+          "Ask the first time"
+        ],
+        [
+          "duckduckgo",
+          "DuckDuckGo Email Protection"
+        ],
+        [
+          "firefoxrelay",
+          "Firefox Relay"
+        ],
+        [
+          "simplelogin",
+          "SimpleLogin"
+        ],
+        [
+          "addy",
+          "addy.io"
+        ],
+        [
+          "forwardemail",
+          "Forward Email"
+        ]
+      ]
+    },
+    {
+      "pref": "breached.mods.bitwarden.forwarderDomain",
+      "label": "Domain for forwarding addresses",
+      "hint": "addy.io: your addy.io domain (empty uses anonaddy.me). Forward Email: your domain (needed).",
+      "placeholder": "anonaddy.me",
       "type": "text"
     },
     {

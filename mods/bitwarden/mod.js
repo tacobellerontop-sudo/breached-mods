@@ -14,6 +14,9 @@
  *                    words for a passphrase): paste, copy or another one
  *   :bw.exe username a new username (a random word, or an address made
  *                    from your email address or domain in settings)
+ *   :bw.exe alias    a new forwarding address (DuckDuckGo, Firefox Relay,
+ *                    SimpleLogin, addy.io or Forward Email) that sends mail
+ *                    on to you; its API key is kept in your vault
  *   :bw.exe new      save a login for this site: a username and a new
  *                    password, kept in the vault and pasted into the page
  *   :bw.exe sync     fetch the latest vault
@@ -223,6 +226,12 @@ const Bitwarden = {
     Breached.showMessage("Logged in to Bitwarden");
   },
 
+  /** The site in the selected tab, or "" (what a forwarding address is made for). */
+  currentHost(browser = Breached.selectedBrowser) {
+    let url = browser?.currentURI;
+    return url && /^https?$/.test(url.scheme) ? url.host : "";
+  },
+
   currentURL(browser = Breached.selectedBrowser) {
     let url = browser?.currentURI?.spec;
     if (!url || !/^https?:/.test(url)) {
@@ -342,6 +351,10 @@ const Bitwarden = {
       case "user":
         await this.offerUsername();
         return;
+      case "alias":
+      case "forward":
+        await this.offer("email address", () => Forwarder.address(this.currentHost()));
+        return;
       case "new":
       case "add":
         await this.newLogin();
@@ -375,6 +388,7 @@ const Bitwarden = {
     rows.push({ label: "new password", detail: `${generatorLength()} characters, to paste or copy`, run: "generate" });
     rows.push({ label: "new passphrase", detail: "four words", run: "generate words" });
     rows.push({ label: "new username", detail: "a random username", run: "username" });
+    rows.push({ label: "new forwarding address", detail: Forwarder.service()?.name ?? "DuckDuckGo, Firefox Relay, SimpleLogin, addy.io…", run: "alias" });
     if (onSite) {
       rows.push({ label: "save a login for this site", detail: "a username and a new password, kept in Bitwarden", run: "new" });
       rows.push({ label: "two-step code", detail: "copy this site's current code", run: "totp" });
@@ -662,12 +676,21 @@ const Bitwarden = {
     }
     let pickedName = await Breached.pick(`username for ${url.hostname}:`, [
       { label: "type my own", detail: "type the username or email address", own: true },
+      {
+        label: "new forwarding address",
+        detail: `made by ${Forwarder.service()?.name ?? "DuckDuckGo, Firefox Relay, SimpleLogin, addy.io…"}`,
+        forward: true,
+      },
       ...[...new Set(suggestions)].map(name => ({ label: name, detail: "a new username", name })),
     ]);
     if (!pickedName) {
       return;
     }
-    let username = pickedName.own ? await Breached.prompt(`username for ${url.hostname}:`) : pickedName.name;
+    let username = pickedName.own
+      ? await Breached.prompt(`username for ${url.hostname}:`)
+      : pickedName.forward
+        ? await Forwarder.address(url.hostname)
+        : pickedName.name;
     if (!username) {
       return;
     }
@@ -920,12 +943,28 @@ const Passkeys = {
   /** A site asked for a passkey while none are loaded: unlock, then it can try again. */
   request(browser, origin) {
     let host = new URL(origin).hostname;
-    Breached.showMessage(`${host} asked for a passkey: unlock Bitwarden, then try again`);
-    Bitwarden.unlock().catch(e => {
-      if (e.message != "cancelled") {
-        Breached.showMessage(`bw.exe: ${e.message}`, "error");
-      }
-    });
+    Breached.showMessage(`${host} asked for a passkey: unlock Bitwarden`);
+    let done = false;
+    Bitwarden.unlock()
+      .catch(e => {
+        if (e.message != "cancelled") {
+          Breached.showMessage(`bw.exe: ${e.message}`, "error");
+        }
+      })
+      .finally(() => (done = true));
+    // Gecko hands the request to the authenticator as soon as this returns,
+    // so hold it here (the window keeps working) until the vault's passkeys
+    // are in: the site then gets its answer without trying again.
+    let until = Date.now() + 3 * 60 * 1000;
+    let timer = setInterval(() => {}, 500);
+    try {
+      Services.tm.spinEventLoopUntil(
+        "Bitwarden: unlocking for a passkey",
+        () => done || Engine.loaded || !browser.isConnected || Date.now() > until
+      );
+    } finally {
+      clearInterval(timer);
+    }
   },
 
   /** A site made a passkey in Breached: keep it in the vault. */
@@ -1059,6 +1098,156 @@ for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
     ModHost.Mods._actors.delete(name);
   }
 }
+
+// ---------------------------------------------------------- forwarding addresses
+
+/**
+ * Email forwarding services, as in Bitwarden's own username generator: each
+ * makes a new address that forwards to you. Their API key is kept in the
+ * vault as a login named "Breached: <service> API key".
+ */
+const FORWARDERS = {
+  duckduckgo: {
+    name: "DuckDuckGo",
+    keyHint: "the token from duckduckgo.com/email (Bitwarden's help explains where)",
+    request: () => ({ url: "https://quack.duckduckgo.com/api/email/addresses" }),
+    auth: key => ({ Authorization: "Bearer " + key }),
+    address: json => json.address && `${json.address}@duck.com`,
+  },
+  firefoxrelay: {
+    name: "Firefox Relay",
+    keyHint: "the API key from relay.firefox.com/accounts/settings",
+    request: host => ({
+      url: "https://relay.firefox.com/api/v1/relayaddresses/",
+      body: { enabled: true, generated_for: host, description: host ? `${host} - Generated by Breached` : "Generated by Breached" },
+    }),
+    auth: key => ({ Authorization: "Token " + key }),
+    address: json => json.full_address,
+  },
+  simplelogin: {
+    name: "SimpleLogin",
+    keyHint: "an API key from app.simplelogin.io/dashboard/api_key",
+    request: host => ({
+      url: "https://app.simplelogin.io/api/alias/random/new" + (host ? `?hostname=${encodeURIComponent(host)}` : ""),
+      body: { note: host ? `Generated by Breached for ${host}` : "Generated by Breached" },
+    }),
+    auth: key => ({ Authentication: key }),
+    address: json => json.alias,
+  },
+  addy: {
+    name: "addy.io",
+    keyHint: "an API key from app.addy.io/settings/api",
+    request: host => ({
+      url: "https://app.addy.io/api/v1/aliases",
+      body: { domain: forwarderDomain() || "anonaddy.me", description: host ? `${host} - Generated by Breached` : "Generated by Breached" },
+    }),
+    auth: key => ({ Authorization: "Bearer " + key }),
+    address: json => json.data?.email,
+  },
+  forwardemail: {
+    name: "Forward Email",
+    keyHint: "an API token from forwardemail.net/my-account/security",
+    needsDomain: true,
+    request: host => ({
+      url: `https://api.forwardemail.net/v1/domains/${encodeURIComponent(forwarderDomain())}/aliases`,
+      body: { labels: host, description: host ? `Generated by Breached for ${host}` : "Generated by Breached" },
+    }),
+    auth: key => ({ Authorization: "Basic " + btoa(key + ":") }),
+    address: json => json.name && `${json.name}@${json.domain?.name ?? forwarderDomain()}`,
+  },
+};
+const FORWARDER_PREF = "breached.mods.bitwarden.forwarder";
+
+function forwarderDomain() {
+  return Mod.pref("breached.mods.bitwarden.forwarderDomain", "").trim().replace(/^@/, "");
+}
+
+const Forwarder = {
+  service() {
+    return FORWARDERS[Mod.pref(FORWARDER_PREF, "")] ?? null;
+  },
+
+  /** The service to use; the first time, rows to pick one. */
+  async choose() {
+    let service = this.service();
+    if (service) {
+      return service;
+    }
+    let picked = await Breached.pick(
+      "forwarding service:",
+      Object.entries(FORWARDERS).map(([id, s]) => ({ label: s.name, detail: `needs ${s.keyHint}`, id }))
+    );
+    if (!picked) {
+      throw new Error("cancelled");
+    }
+    Services.prefs.setStringPref(FORWARDER_PREF, picked.id);
+    return FORWARDERS[picked.id];
+  },
+
+  itemName(service) {
+    return `Breached: ${service.name} API key`;
+  },
+
+  /** The service's API key from the vault; the first time, asks for it and keeps it there. */
+  async key(service) {
+    await Bitwarden.unlock();
+    let name = this.itemName(service);
+    let item = (await Bitwarden.vault()).find(i => i.type == 1 && i.name == name && i.login?.password);
+    if (item) {
+      return item.login.password;
+    }
+    let key = (await Breached.prompt(`${service.name} API key (${service.keyHint}):`, { password: true }))?.trim();
+    if (!key) {
+      throw new Error("cancelled");
+    }
+    let saved = await Passkeys.saveItem({
+      type: 1,
+      name,
+      notes: "Used by Breached's Bitwarden mod to make forwarding addresses (:bw.exe alias).",
+      favorite: false,
+      fields: [],
+      login: { uris: [], username: "", password: key, totp: null },
+      secureNote: null,
+      card: null,
+      identity: null,
+      reprompt: 0,
+    });
+    Bitwarden.items = [...(Bitwarden.items ?? []).filter(i => i.id != saved.id), saved];
+    return key;
+  },
+
+  /** A new forwarding address, made for host (may be ""). */
+  async address(host) {
+    let service = await this.choose();
+    if (service.needsDomain && !forwarderDomain()) {
+      throw new Error(`${service.name} needs your domain: set it in settings > mods > Bitwarden`);
+    }
+    let key = await this.key(service);
+    let { url, body } = service.request(host);
+    // The self-test answers from a data: address instead of the service.
+    url = Mod.pref("breached.mods.bitwarden.forwarderTestUrl", "") || url;
+    Breached.showMessage(`Asking ${service.name} for an address…`);
+    let response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...service.auth(key) },
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: "omit",
+    });
+    if (response.status == 401 || response.status == 403) {
+      throw new Error(`${service.name} refused the API key: change it in the "${this.itemName(service)}" login in Bitwarden`);
+    }
+    if (!response.ok) {
+      throw new Error(`${service.name} said ${response.status} ${response.statusText}`.trim());
+    }
+    let address = service.address(await response.json());
+    if (!address) {
+      throw new Error(`${service.name} didn't send an address`);
+    }
+    Bitwarden.touch();
+    Breached.hideMessage?.();
+    return address;
+  },
+};
 
 // ---------------------------------------------------------------- vault items
 
@@ -1289,7 +1478,7 @@ function readClipboard() {
 
 Mod.command("bw.exe", {
   usage:
-    "bw.exe [logins|find|notes|generate|username|new|totp|sync|lock|login|pin|status]  (Bitwarden: a menu of all of it; Ctrl+Shift+L for this site's logins)",
+    "bw.exe [logins|find|notes|generate|username|alias|new|totp|sync|lock|login|pin|status]  (Bitwarden: a menu of all of it; Ctrl+Shift+L for this site's logins)",
   run(args) {
     Bitwarden.run(args).catch(e => {
       if (e.message != "cancelled") {
