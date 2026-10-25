@@ -137,6 +137,7 @@ const Bitwarden = {
       // Locked for good: sites can't use its passkeys until it's unlocked again.
       if (Engine.provider === Passkeys) {
         Engine.unload();
+        Passkeys.shareReady();
       }
     }
   },
@@ -904,6 +905,13 @@ const Passkeys = {
     return passkey.userName || item.login?.username || passkey.userDisplayName || item.name;
   },
 
+  /** Tells pages whether to hold passkey requests (see PasskeyWaitChild). */
+  shareReady() {
+    let ready = Engine.running ? Engine.loaded : null;
+    Services.ppmm.sharedData.set("breached.bitwarden.passkeysReady", ready);
+    Services.ppmm.sharedData.flush();
+  },
+
   /** Loads the vault's passkeys into Breached (the vault is unlocked). */
   async load() {
     if (!Engine.running) {
@@ -938,33 +946,53 @@ const Passkeys = {
       }
     }
     Engine.load(list);
+    this.shareReady();
   },
 
   /** A site asked for a passkey while none are loaded: unlock, then it can try again. */
   request(browser, origin) {
+    // (A page loaded while locked waits in PasskeyWaitChild instead; this is one from before.)
     let host = new URL(origin).hostname;
-    Breached.showMessage(`${host} asked for a passkey: unlock Bitwarden`);
-    let done = false;
-    Bitwarden.unlock()
-      .catch(e => {
-        if (e.message != "cancelled") {
-          Breached.showMessage(`bw.exe: ${e.message}`, "error");
-        }
-      })
-      .finally(() => (done = true));
-    // Gecko hands the request to the authenticator as soon as this returns,
-    // so hold it here (the window keeps working) until the vault's passkeys
-    // are in: the site then gets its answer without trying again.
-    let until = Date.now() + 3 * 60 * 1000;
-    let timer = setInterval(() => {}, 500);
-    try {
-      Services.tm.spinEventLoopUntil(
-        "Bitwarden: unlocking for a passkey",
-        () => done || Engine.loaded || !browser.isConnected || Date.now() > until
-      );
-    } finally {
-      clearInterval(timer);
+    Breached.showMessage(`${host} asked for a passkey: unlock Bitwarden, then try again`);
+    Bitwarden.unlock().catch(e => {
+      if (e.message != "cancelled") {
+        Breached.showMessage(`bw.exe: ${e.message}`, "error");
+      }
+    });
+  },
+
+  /**
+   * A page's passkey request waiting (PasskeyWaitChild): unlocks, and
+   * resolves true once the vault's passkeys are loaded, false if not.
+   */
+  waitForUnlock(browser, origin) {
+    if (Engine.loaded || !Engine.running) {
+      return Engine.loaded;
     }
+    let host = "";
+    try {
+      host = new URL(origin).hostname;
+    } catch (e) {}
+    Breached.showMessage(`${host || "This site"} asked for a passkey: unlock Bitwarden`);
+    return new Promise(resolve => {
+      // Done as soon as they're in, not after the PIN question that may follow.
+      let timer = setInterval(() => {
+        if (Engine.loaded) {
+          clearInterval(timer);
+          resolve(true);
+        }
+      }, 200);
+      Bitwarden.unlock()
+        .catch(e => {
+          if (e.message != "cancelled") {
+            Breached.showMessage(`bw.exe: ${e.message}`, "error");
+          }
+        })
+        .finally(() => {
+          clearInterval(timer);
+          resolve(Engine.loaded);
+        });
+    });
   },
 
   /** A site made a passkey in Breached: keep it in the vault. */
@@ -1084,9 +1112,28 @@ const passkeysSetting = () => {
   } else if (!Passkeys.on() && Engine.provider === Passkeys) {
     Engine.stop();
   }
+  Passkeys.shareReady();
 };
 passkeysSetting();
 Services.prefs.addObserver(PASSKEYS_PREF, passkeysSetting);
+// Pages loaded while locked hold their passkey requests until the unlock.
+// With several windows open, the first window's registration (maybe an
+// older version's) stays: register this version's.
+if (ModHost.Mods.bitwardenWaitActor != Mod.info.version && ModHost.Mods._actors?.has("BitwardenWait")) {
+  try {
+    ChromeUtils.unregisterWindowActor("BitwardenWait");
+  } catch (e) {
+    // not registered
+  }
+  ModHost.Mods._actors.delete("BitwardenWait");
+}
+ModHost.Mods.bitwardenWaitActor = Mod.info.version;
+Mod.actor("BitwardenWait", {
+  parent: "PasskeyWaitParent.sys.mjs" + V,
+  child: "PasskeyWaitChild.sys.mjs" + V,
+  // When the page's root element arrives, before its scripts run.
+  events: { DOMDocElementInserted: { capture: true }, DOMWindowCreated: {} },
+});
 // Before 1.7 the passkeys were answered in the page.
 for (let name of ["BitwardenPasskeys", "Bitwarden"]) {
   if (ModHost.Mods._actors?.has(name)) {
@@ -1513,5 +1560,6 @@ Mod.onUnload(() => {
     } else {
       Engine.stop();
     }
+    Passkeys.shareReady();
   }
 });
