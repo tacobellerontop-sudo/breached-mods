@@ -41,7 +41,9 @@
  * its passkey straight away (rows if there are several accounts). A login
  * box that offers passkeys shows them with the logins of Ctrl+Shift+L.
  * Passkeys sites make are kept in the vault. They stay usable until
- * :bw.exe lock all or Breached closes. bw.exe only stores them.
+ * :bw.exe lock all or Breached closes. bw.exe only stores them. A page that
+ * asks while none are loaded (after a restart) waits for the unlock, then
+ * signs in by itself (PasskeyWaitChild.sys.mjs).
  *
  * Pasting types the text into the page the way a keyboard does, so it
  * works in any box the page has. The unlock key is kept in memory only
@@ -966,7 +968,6 @@ const Passkeys = {
    * resolves true once the vault's passkeys are loaded, false if not.
    */
   waitForUnlock(browser, origin) {
-    Services.console.logStringMessage("Bitwarden wait: parent " + [Engine.loaded, Engine.running].join(" "));
     if (Engine.loaded || !Engine.running) {
       return Engine.loaded;
     }

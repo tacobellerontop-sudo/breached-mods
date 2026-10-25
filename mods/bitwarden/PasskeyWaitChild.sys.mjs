@@ -28,7 +28,6 @@ export class BitwardenWaitChild extends JSWindowActorChild {
       return;
     }
     wrapped.add(doc);
-    Services.console.logStringMessage("Bitwarden wait: wrapping " + event.type + " " + doc.URL);
     let container = win.navigator.credentials;
     if (!container) {
       return;
@@ -48,7 +47,6 @@ export class BitwardenWaitChild extends JSWindowActorChild {
       } catch (e) {
         // a getter that throws: Gecko reports it
       }
-      Services.console.logStringMessage("Bitwarden wait: request " + [passkey, Services.cpmm.sharedData.get(READY)].join(" "));
       if (!passkey || Services.cpmm.sharedData.get(READY) !== false) {
         return call();
       }
@@ -56,7 +54,7 @@ export class BitwardenWaitChild extends JSWindowActorChild {
         Cu.exportFunction((resolve, reject) => {
           let go = why => {
             if (why !== true) {
-              Services.console.logStringMessage("Bitwarden wait: going on without waiting " + [why].join(" "));
+              console.error("Bitwarden: a passkey request went on without waiting", why);
             }
             try {
               resolve(call());
@@ -73,10 +71,7 @@ export class BitwardenWaitChild extends JSWindowActorChild {
             go(e);
             return;
           }
-          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(answer => {
-            Services.console.logStringMessage("Bitwarden wait: answered " + [answer].join(" "));
-            go(true);
-          }, go);
+          actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(() => go(true), go);
         }, win)
       );
     }

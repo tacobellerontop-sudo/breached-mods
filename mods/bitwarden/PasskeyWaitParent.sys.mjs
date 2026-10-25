@@ -5,15 +5,13 @@
 // The window side of PasskeyWaitChild: asks the tab's window to unlock
 // Bitwarden and answers once its passkeys are loaded (or it gave up).
 
-const log = text => Services.console.logStringMessage("Bitwarden wait: " + text);
-
 export class BitwardenWaitParent extends JSWindowActorParent {
   async receiveMessage(message) {
     if (message.name != "Bitwarden:WaitForPasskeys") {
       return null;
     }
     let browser = this.browsingContext.top.embedderElement;
-    let win = browser?.ownerGlobal;
+    let win = browser?.ownerDocument?.defaultView;
     // The tab's window, else any window running the mod.
     let provider = win?.breachedBitwardenPasskeys;
     if (!provider) {
@@ -21,14 +19,13 @@ export class BitwardenWaitParent extends JSWindowActorParent {
         provider ??= other.breachedBitwardenPasskeys;
       }
     }
-    log(`parent actor: browser ${!!browser}, window ${win?.location?.href}, provider ${!!provider}`);
     if (!provider) {
       return false;
     }
     try {
       return await provider.waitForUnlock(browser, this.manager.documentPrincipal?.originNoSuffix ?? "");
     } catch (e) {
-      log("failed: " + e + " " + e?.stack);
+      console.error("Bitwarden: waiting for the unlock", e);
       return false;
     }
   }
