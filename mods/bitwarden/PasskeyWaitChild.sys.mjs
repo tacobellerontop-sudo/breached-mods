@@ -10,7 +10,7 @@
 
 const READY = "breached.bitwarden.passkeysReady";
 
-const wrapped = new WeakSet();
+const wrapped = new WeakSet(); // documents done
 
 export class BitwardenWaitChild extends JSWindowActorChild {
   handleEvent(event) {
@@ -23,10 +23,11 @@ export class BitwardenWaitChild extends JSWindowActorChild {
     }
     let win = this.contentWindow;
     let principal = this.document?.nodePrincipal;
-    if (!win?.isSecureContext || !principal?.isContentPrincipal || !/^https?$/.test(principal.scheme) || wrapped.has(win)) {
+    let doc = this.document;
+    if (!win?.isSecureContext || !principal?.isContentPrincipal || !/^https?$/.test(principal.scheme) || wrapped.has(doc)) {
       return;
     }
-    wrapped.add(win);
+    wrapped.add(doc);
     let container = win.navigator.credentials;
     if (!container) {
       return;
@@ -36,7 +37,6 @@ export class BitwardenWaitChild extends JSWindowActorChild {
     let nativeCreate = proto.create;
     let get = options => wait(options, nativeGet);
     let create = options => wait(options, nativeCreate);
-    let actor = this;
     function wait(options, native) {
       let call = () => native.call(container, options);
       let page = options == null ? null : Cu.waiveXrays(options);
@@ -59,6 +59,15 @@ export class BitwardenWaitChild extends JSWindowActorChild {
               reject(e);
             }
           };
+          // This document's actor (the one that wrapped may belong to the
+          // blank page the frame started with).
+          let actor;
+          try {
+            actor = win.windowGlobalChild.getActor("BitwardenWait");
+          } catch (e) {
+            go();
+            return;
+          }
           actor.sendQuery("Bitwarden:WaitForPasskeys", {}).then(go, go);
         }, win)
       );
